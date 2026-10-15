@@ -123,10 +123,49 @@ def _clean_cloud_date(v: Optional[str]) -> Optional[str]:
     return v_str[:10]
 
 
+DEFAULT_SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1-1XDAVUDdAGK-OUfCog8bDizN8Ax-oeHfl81rHlxfmI/export?format=csv"
+
+
+def load_database_from_sheet_csv(sheet_url: str = DEFAULT_SPREADSHEET_CSV_URL) -> Dict[str, Any]:
+    """Lê registros diretamente da exportação CSV da planilha do Google Docs com altíssima velocidade (<0.5s)."""
+    import urllib.request
+    import csv
+    import io
+    import re
+
+    csv_url = sheet_url
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+    if m:
+        sheet_id = m.group(1)
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+
+    req = urllib.request.Request(csv_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        text = resp.read().decode("utf-8")
+
+    reader = csv.DictReader(io.StringIO(text))
+    records = []
+    for r in reader:
+        d_val = _clean_cloud_date(r.get("data"))
+        if not d_val:
+            continue
+        records.append({
+            "data": d_val,
+            "entrada": _clean_cloud_time(r.get("entrada")),
+            "inicio_pausa": _clean_cloud_time(r.get("inicio_pausa")),
+            "fim_pausa": _clean_cloud_time(r.get("fim_pausa")),
+            "saida": _clean_cloud_time(r.get("saida")),
+            "meta_dia": float(r.get("meta_dia", 6.0)) if r.get("meta_dia") else 6.0,
+            "observacao": str(r.get("observacao", "") or ""),
+        })
+
+    return {"config": DEFAULT_CONFIG.copy(), "registros": records}
+
+
 def load_database_from_apps_script(url: str) -> Dict[str, Any]:
     """Lê registros e configurações via Web App do Google Apps Script com normalização."""
     import requests
-    resp = requests.get(url, timeout=12)
+    resp = requests.get(url, timeout=20)
     if resp.status_code == 200:
         data = resp.json()
         raw_records = []
@@ -159,7 +198,7 @@ def load_database_from_apps_script(url: str) -> Dict[str, Any]:
 def save_database_to_apps_script(url: str, data: Dict[str, Any]):
     """Envia novos registros para a planilha via Web App do Google Apps Script."""
     import requests
-    resp = requests.post(url, json=data, timeout=15)
+    resp = requests.post(url, json=data, timeout=35)
     if resp.status_code not in (200, 201):
         raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
 
@@ -278,23 +317,56 @@ def save_database_to_sheets(data: Dict[str, Any]):
 def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
     """
     Carrega o banco de dados.
-    Se a nuvem estiver configurada (Apps Script ou gspread), lê de lá e atualiza o cache local.
-    Caso contrário ou offline, utiliza o arquivo JSON local.
+    Lê com prioridade da planilha na nuvem (Google Sheets CSV rápido ou Apps Script)
+    e sincroniza o cache local. Em caso de offline, usa o arquivo local.
     """
-    if is_cloud_configured():
+    cloud_data = None
+
+    # 1. Tenta carregar instantaneamente do Google Sheets CSV (sub-segundo)
+    try:
+        import streamlit as st
+        sheet_url = st.secrets.get("spreadsheet_url", DEFAULT_SPREADSHEET_CSV_URL)
+    except Exception:
+        sheet_url = DEFAULT_SPREADSHEET_CSV_URL
+
+    if sheet_url:
+        try:
+            cloud_data = load_database_from_sheet_csv(sheet_url)
+        except Exception as e_csv:
+            pass
+
+    # 2. Se não conseguiu pelo CSV, tenta pelo Apps Script se configurado
+    if not cloud_data or not cloud_data.get("registros"):
         try:
             import streamlit as st
             if "apps_script_url" in st.secrets:
                 cloud_data = load_database_from_apps_script(st.secrets["apps_script_url"])
-            else:
-                cloud_data = load_database_from_sheets()
+        except Exception:
+            pass
 
-            # Mantém cópia local sincronizada como backup
-            save_database(cloud_data, filepath)
+    # 3. Se temos dados da nuvem e eles são consistentes, mescla com configurações locais
+    if cloud_data and cloud_data.get("registros"):
+        local_count = 0
+        local_cfg = DEFAULT_CONFIG.copy()
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    if isinstance(d, dict):
+                        local_count = len(d.get("registros", []))
+                        if "config" in d:
+                            local_cfg.update(d["config"])
+            except Exception:
+                pass
+
+        # Só aceita a base da nuvem se ela tiver dados válidos e não estiver vazia/truncada
+        if len(cloud_data["registros"]) >= local_count:
+            local_cfg.update(cloud_data.get("config", {}))
+            cloud_data["config"] = local_cfg
+            save_database(cloud_data, filepath, sync_cloud=False)
             return cloud_data
-        except Exception as e:
-            print(f"Aviso: Não foi possível conectar ao Google Sheets ({e}). Usando base local.")
 
+    # 4. Fallback para arquivo JSON local
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -313,13 +385,13 @@ def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
         "config": DEFAULT_CONFIG.copy(),
         "registros": [],
     }
-    save_database(initial_data, filepath)
+    save_database(initial_data, filepath, sync_cloud=False)
     return initial_data
 
 
-def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH) -> bool:
+def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH, sync_cloud: bool = True) -> bool:
     """
-    Salva os dados de forma segura no JSON local e, se a nuvem estiver ativa,
+    Salva os dados de forma segura no JSON local e, se sync_cloud for True e a nuvem estiver ativa,
     sincroniza em tempo real com o Google Sheets.
     """
     saved_local = False
@@ -336,18 +408,16 @@ def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH) -> bo
     except Exception as e:
         print(f"Erro ao salvar localmente em {filepath}: {e}")
 
-    # Sincronização em nuvem se habilitada
-    if is_cloud_configured():
+    # Sincronização em nuvem se solicitada e habilitada
+    if sync_cloud and is_cloud_configured():
         try:
             import streamlit as st
             if "apps_script_url" in st.secrets:
                 save_database_to_apps_script(st.secrets["apps_script_url"], data)
-            else:
+            elif "spreadsheet_url" in st.secrets:
                 save_database_to_sheets(data)
         except Exception as e:
             print(f"Aviso: Erro ao sincronizar com Google Sheets: {e}")
-
-    return saved_local
 
     return saved_local
 

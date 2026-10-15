@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Streamlit secrets (NUNCA comitar credenciais)
+.streamlit/secrets.toml
+
+# Ambientes virtuais
+venv/
+env/
+.env
+
+# Arquivos temporários e de log
+*.tmp
+*.log
+
+# Caches de sistema operacional
+.DS_Store
+Thumbs.db

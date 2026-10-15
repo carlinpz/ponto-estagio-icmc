@@ -1,0 +1,144 @@
+{
+  "config": {
+    "carga_horaria_diaria": 6.0,
+    "dias_uteis": [
+      "Segunda-feira",
+      "Terça-feira",
+      "Quarta-feira",
+      "Quinta-feira",
+      "Sexta-feira"
+    ],
+    "nome_estagiario": "Estagiário(a)",
+    "nome_supervisor": "Gestor(a) / Supervisor(a)",
+    "empresa_setor": "ICMC / USP",
+    "pin_estagiario": ""
+  },
+  "registros": [
+    {
+      "data": "2026-09-28",
+      "entrada": "09:00:00",
+      "inicio_pausa": "12:00:00",
+      "fim_pausa": "13:00:00",
+      "saida": "16:00:00",
+      "meta_dia": 6.0,
+      "observacao": "Primeiro Dia"
+    },
+    {
+      "data": "2026-09-29",
+      "entrada": "08:00:00",
+      "inicio_pausa": "12:40:00",
+      "fim_pausa": "13:40:00",
+      "saida": "15:00:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-09-30",
+      "entrada": "08:00:00",
+      "inicio_pausa": "12:00:00",
+      "fim_pausa": "13:00:00",
+      "saida": "15:00:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-01",
+      "entrada": "08:13:00",
+      "inicio_pausa": "12:00:00",
+      "fim_pausa": "13:00:00",
+      "saida": "15:13:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-02",
+      "entrada": "08:15:00",
+      "inicio_pausa": "12:40:00",
+      "fim_pausa": "13:40:00",
+      "saida": "15:15:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-05",
+      "entrada": "08:15:00",
+      "inicio_pausa": "13:00:00",
+      "fim_pausa": "14:00:00",
+      "saida": "15:15:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-06",
+      "entrada": "08:15:00",
+      "inicio_pausa": "12:20:00",
+      "fim_pausa": "13:20:00",
+      "saida": "15:15:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-07",
+      "entrada": "08:15:00",
+      "inicio_pausa": "12:10:00",
+      "fim_pausa": "13:10:00",
+      "saida": "15:30:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-08",
+      "entrada": "08:15:00",
+      "inicio_pausa": "12:40:00",
+      "fim_pausa": "13:40:00",
+      "saida": "15:15:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-09",
+      "entrada": "08:20:00",
+      "inicio_pausa": "12:30:00",
+      "fim_pausa": "13:30:00",
+      "saida": "15:20:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-12",
+      "entrada": null,
+      "inicio_pausa": null,
+      "fim_pausa": null,
+      "saida": null,
+      "meta_dia": 0.0,
+      "observacao": "Feriado"
+    },
+    {
+      "data": "2026-10-13",
+      "entrada": "08:00:00",
+      "inicio_pausa": "12:00:00",
+      "fim_pausa": "13:00:00",
+      "saida": "15:30:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-14",
+      "entrada": "08:00:00",
+      "inicio_pausa": "12:00:00",
+      "fim_pausa": "13:00:00",
+      "saida": "15:00:00",
+      "meta_dia": 6.0,
+      "observacao": ""
+    },
+    {
+      "data": "2026-10-15",
+      "entrada": "08:12:50",
+      "inicio_pausa": null,
+      "fim_pausa": null,
+      "saida": null,
+      "meta_dia": 6.0,
+      "observacao": "Registro via Ponto Rápido"
+    }
+  ]
+}

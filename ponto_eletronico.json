@@ -134,8 +134,8 @@
     {
       "data": "2026-10-15",
       "entrada": "08:12:50",
-      "inicio_pausa": null,
-      "fim_pausa": null,
+      "inicio_pausa": "12:22:56",
+      "fim_pausa": "13:10:17",
       "saida": null,
       "meta_dia": 6.0,
       "observacao": "Registro via Ponto Rápido"

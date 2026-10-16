@@ -3,9 +3,22 @@ Módulo de Cálculos e Regras de Negócio para Ponto Eletrônico de Estágio.
 Contém funções para processamento de horas, saldos, formatações e validações.
 """
 
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Dict, Any, Tuple, Optional, List
 import pandas as pd
+
+# Fuso horário oficial de Brasília / São Paulo (UTC-3) para consistência entre localhost e nuvem
+BRT_TZ = timezone(timedelta(hours=-3))
+
+
+def now_br() -> datetime:
+    """Retorna o datetime atual no fuso horário de Brasília (UTC-3), sem tzinfo para cálculos."""
+    return datetime.now(BRT_TZ).replace(tzinfo=None)
+
+
+def today_br() -> date:
+    """Retorna a data de hoje no fuso horário de Brasília (UTC-3)."""
+    return datetime.now(BRT_TZ).date()
 
 
 def parse_time_str(time_str: Optional[str]) -> Optional[time]:
@@ -106,13 +119,13 @@ def calculate_day_worked_hours(
 
 def compute_current_elapsed_time(entrada: str, inicio_pausa: Optional[str] = None, fim_pausa: Optional[str] = None) -> float:
     """
-    Calcula tempo decorrido até o momento presente para um dia em andamento.
+    Calcula tempo decorrido até o momento presente para um dia em andamento (fuso Brasília).
     """
     t_entrada = parse_time_str(entrada)
     if not t_entrada:
         return 0.0
 
-    agora = datetime.now()
+    agora = now_br()
     dt_entrada = datetime.combine(agora.date(), t_entrada)
 
     if agora < dt_entrada:
@@ -173,6 +186,8 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
     rows = []
     for r in records:
         data_str = r.get("data", "")
+        if not data_str or data_str in ("CONFIG_JSON", "__CONFIG__"):
+            continue
         try:
             d_obj = datetime.strptime(data_str, "%Y-%m-%d").date()
             data_formatada = d_obj.strftime("%d/%m/%Y")
@@ -186,7 +201,8 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
         ini_pausa = r.get("inicio_pausa", "")
         fim_pausa = r.get("fim_pausa", "")
         saida = r.get("saida", "")
-        meta = float(r.get("meta_dia", target_hours_per_day))
+        meta = float(r.get("meta_dia", target_hours_per_day) if r.get("meta_dia") is not None else target_hours_per_day)
+        obs = str(r.get("observacao", "") or "")
 
         horas_trab, status = calculate_day_worked_hours(entrada, ini_pausa, fim_pausa, saida)
 
@@ -201,6 +217,11 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
             saldo_fmt = "Em andamento"
             horas_fmt = "Em andamento"
             status = "Em andamento"
+        elif meta == 0.0 or any(k in obs.lower() for k in ("feriado", "recesso", "dispensa", "abono", "folga")):
+            saldo = 0.0
+            saldo_fmt = "00h 00m"
+            horas_fmt = "00h 00m"
+            status = "Feriado / Abono"
         else:
             saldo = -meta
             saldo_fmt = decimal_hours_to_hm_str(saldo, show_sign=True)
@@ -222,12 +243,12 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
             "Saldo (h)": saldo,
             "Saldo Formatado": saldo_fmt,
             "Status": status,
-            "Observação": r.get("observacao", "")
+            "Observação": obs
         })
 
     df = pd.DataFrame(rows)
     # Ordenar por data cronológica
-    if "date_obj" in df.columns:
+    if not df.empty and "date_obj" in df.columns:
         df = df.sort_values(by="raw_date", ascending=True).reset_index(drop=True)
         # Calcula saldo acumulado para dias concluídos
         mask_concluido = df["Status"] == "Concluído"
@@ -257,10 +278,12 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
     com base nas regras da Lei do Estágio (Lei 11.788/2008).
     """
     issues = []
-    hoje = date.today()
+    hoje = today_br()
 
     for r in records:
         data_str = r.get("data", "")
+        if not data_str or data_str in ("CONFIG_JSON", "__CONFIG__"):
+            continue
         try:
             d_obj = datetime.strptime(data_str, "%Y-%m-%d").date()
             data_fmt = d_obj.strftime("%d/%m/%Y")
@@ -277,6 +300,7 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
             if entrada and not saida:
                 issues.append({
                     "tipo": "danger",
+                    "raw_date": data_str,
                     "data": data_fmt,
                     "titulo": "Saída não registrada",
                     "mensagem": f"No dia {data_fmt}, a entrada foi registrada mas a saída não foi marcada.",
@@ -284,6 +308,7 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
             if ini_pausa and not fim_pausa:
                 issues.append({
                     "tipo": "warning",
+                    "raw_date": data_str,
                     "data": data_fmt,
                     "titulo": "Retorno de intervalo pendente",
                     "mensagem": f"No dia {data_fmt}, houve início de pausa sem registro de retorno.",
@@ -295,6 +320,7 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
             if horas_trab > 6.5:
                 issues.append({
                     "tipo": "warning",
+                    "raw_date": data_str,
                     "data": data_fmt,
                     "titulo": "Jornada superior ao limite do estágio",
                     "mensagem": f"No dia {data_fmt}, foram realizadas {decimal_hours_to_hm_str(horas_trab)} ({horas_trab:.2f}h). A Lei 11.788/2008 veda horas extras habituais além de 6h diárias.",

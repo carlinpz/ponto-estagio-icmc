@@ -27,6 +27,8 @@ from calculations import (
     get_weekday_name,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
+    now_br,
+    today_br,
 )
 from theme import (
     inject_custom_theme,
@@ -40,6 +42,7 @@ from components import (
     render_charts,
     render_manager_screen,
     render_welcome_screen,
+    compute_auth_token,
 )
 
 # Configuração da página Streamlit
@@ -54,9 +57,10 @@ st.set_page_config(
 inject_custom_theme()
 
 
-def init_session_state():
+def init_session_state(force_reload: bool = False):
     """Inicializa e carrega os dados mais recentes do banco de dados."""
-    st.session_state.db = load_database()
+    if force_reload or "db" not in st.session_state:
+        st.session_state.db = load_database()
 
 
 init_session_state()
@@ -70,24 +74,37 @@ dias_uteis_padrao = config.get(
     ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"],
 )
 
-hoje = date.today()
+hoje = today_br()
 hoje_str = hoje.strftime("%Y-%m-%d")
 registro_hoje = get_record_by_date(registros, hoje_str)
 
 # -------------------------------------------------------------
-# GERENCIAMENTO DE PERFIL E PRIMEIRO ACESSO (LEMBRA O NAVEGADOR)
+# GERENCIAMENTO DE PERFIL E AUTENTICAÇÃO (USUÁRIO E SENHA)
 # -------------------------------------------------------------
+usuario_cadastrado = str(config.get("usuario_estagiario", "")).strip() or "carlos"
+pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
+expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+
 acesso_param = st.query_params.get("acesso")
+token_param = st.query_params.get("token")
 
 if "perfil_ativo" not in st.session_state:
     if acesso_param in ("gestao", "chefia", "supervisor"):
         st.session_state["perfil_ativo"] = "gestao"
-    elif acesso_param in ("estagiario", "estagio"):
+    elif acesso_param in ("estagiario", "estagio") and token_param == expected_token:
         st.session_state["perfil_ativo"] = "estagiario"
+        st.session_state["autenticado_estagiario"] = True
     else:
         st.session_state["perfil_ativo"] = None
 
-# Se nenhum perfil estiver ativo (primeiro acesso de todos):
+# Se o perfil for estagiário mas não estiver autenticado na sessão nem com token válido, exige login
+if st.session_state.get("perfil_ativo") == "estagiario" and not st.session_state.get("autenticado_estagiario"):
+    if token_param == expected_token:
+        st.session_state["autenticado_estagiario"] = True
+    else:
+        st.session_state["perfil_ativo"] = None
+
+# Se nenhum perfil estiver ativo, exibe a tela inicial de seleção e login:
 if st.session_state["perfil_ativo"] is None:
     def salvar_config_callback(nova_config):
         st.session_state.db["config"] = nova_config
@@ -120,13 +137,18 @@ with st.sidebar:
     # Indicador de Perfil Ativo e Botão para Alternar
     if st.session_state["perfil_ativo"] == "gestao":
         st.caption("Perfil Ativo: **Supervisão / Chefia** (Read-Only)")
-        if st.button("Acesso Estagiário (Requer PIN)", use_container_width=True, key="btn_switch_to_estag"):
-            st.session_state["perfil_ativo"] = None
-            if "acesso" in st.query_params:
-                del st.query_params["acesso"]
+        if st.button("Acesso Estagiário (Login)", use_container_width=True, key="btn_switch_to_estag"):
+            if st.session_state.get("autenticado_estagiario"):
+                st.session_state["perfil_ativo"] = "estagiario"
+                st.query_params["acesso"] = "estagiario"
+                st.query_params["token"] = expected_token
+            else:
+                st.session_state["perfil_ativo"] = None
+                if "acesso" in st.query_params:
+                    del st.query_params["acesso"]
             st.rerun()
     else:
-        st.caption("Perfil Ativo: **Estagiário(a)** (Operacional)")
+        st.caption(f"Perfil Ativo: **Estagiário(a)** (`{usuario_cadastrado}`)")
         col_sw1, col_sw2 = st.columns(2)
         with col_sw1:
             if st.button("Ver Chefia", use_container_width=True, key="btn_switch_to_gestao", help="Visualizar como a chefia visualiza o painel"):
@@ -134,11 +156,16 @@ with st.sidebar:
                 st.query_params["acesso"] = "gestao"
                 st.rerun()
         with col_sw2:
-            if st.button("Sair", use_container_width=True, key="btn_logout", help="Desconectar deste dispositivo e exigir PIN"):
+            if st.button("Sair", use_container_width=True, key="btn_logout", help="Encerrar sessão e voltar para a tela de login"):
                 st.session_state["perfil_ativo"] = None
-                if "acesso" in st.query_params:
-                    del st.query_params["acesso"]
+                st.session_state["autenticado_estagiario"] = False
+                st.query_params.clear()
                 st.rerun()
+
+    if st.button("🔄 Sincronizar Nuvem", use_container_width=True, key="btn_sync_cloud", help="Recarregar dados mais recentes da planilha Google Sheets"):
+        init_session_state(force_reload=True)
+        st.toast("Dados sincronizados com a nuvem!")
+        st.rerun()
 
     st.divider()
 
@@ -150,8 +177,18 @@ with st.sidebar:
     ano_atual = hoje.year
     mes_atual = hoje.month
 
-    anos_disp = sorted(list({int(r["data"][:4]) for r in registros if "data" in r} | {ano_atual}), reverse=True)
-    
+    anos_disp = sorted(
+        list(
+            {
+                int(r["data"][:4])
+                for r in registros
+                if "data" in r and len(str(r["data"])) >= 4 and str(r["data"])[:4].isdigit()
+            }
+            | {ano_atual}
+        ),
+        reverse=True,
+    )
+
     col_mes, col_ano = st.columns(2)
     with col_mes:
         mes_selecionado = st.selectbox(
@@ -201,7 +238,7 @@ with st.sidebar:
 
             nome_estag = st.text_input(
                 "Nome do Estagiário(a):",
-                value=config.get("nome_estagiario", "Estagiário(a)"),
+                value=config.get("nome_estagiario", "Carlos Henrique da Luz Pizzi"),
             )
 
             nome_superv = st.text_input(
@@ -210,15 +247,21 @@ with st.sidebar:
             )
 
             empresa_setor = st.text_input(
-                "Departamento / Empresa:",
-                value=config.get("empresa_setor", "ICMC / USP"),
+                "Departamento / Projeto:",
+                value=config.get("empresa_setor", "605001"),
+            )
+
+            novo_usuario = st.text_input(
+                "Usuário de Login (Estagiário):",
+                value=usuario_cadastrado,
+                help="Nome de usuário utilizado para entrar no sistema.",
             )
 
             novo_pin = st.text_input(
-                "PIN de Acesso (Estagiário):",
-                value=str(config.get("pin_estagiario", "1234")),
+                "Senha de Acesso (Estagiário):",
+                value=pin_cadastrado,
                 type="password",
-                help="PIN exigido ao fazer login pela primeira vez em um novo navegador.",
+                help="Senha pessoal sincronizada na nuvem para acesso ao ponto.",
             )
 
             if st.button("Salvar Parâmetros", use_container_width=True):
@@ -227,15 +270,17 @@ with st.sidebar:
                 config["nome_estagiario"] = nome_estag
                 config["nome_supervisor"] = nome_superv
                 config["empresa_setor"] = empresa_setor
-                config["pin_estagiario"] = novo_pin.strip() if novo_pin.strip() else "1234"
+                config["usuario_estagiario"] = novo_usuario.strip() if novo_usuario.strip() else usuario_cadastrado
+                config["pin_estagiario"] = novo_pin.strip() if novo_pin.strip() else pin_cadastrado
                 save_database(db)
-                st.toast("Configurações salvas com sucesso.")
+                st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
+                st.toast("Configurações e credenciais salvas na nuvem com sucesso.")
                 st.rerun()
 
         st.divider()
 
         st.markdown("##### Registro Rápido")
-        hora_preview = datetime.now().strftime("%H:%M:%S")
+        hora_preview = now_br().strftime("%H:%M:%S")
         render_html(
             f"""
             <div style="display: flex; align-items: center; justify-content: space-between; margin: 4px 0 10px 0; padding: 6px 10px; background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.18); border-radius: 6px;">
@@ -315,19 +360,19 @@ with st.sidebar:
         pode_sai = bool(sb_ent and (not sb_ini_p or sb_fim_p) and not sb_sai)
 
         if st.button("BATER ENTRADA", disabled=not pode_ent, use_container_width=True, key="sb_btn_ent", type="primary" if pode_ent else "secondary"):
-            handle_ponto_action("entrada", datetime.now().strftime("%H:%M:%S"))
+            handle_ponto_action("entrada", now_br().strftime("%H:%M:%S"))
 
         if st.button("INICIAR PAUSA", disabled=not pode_pau, use_container_width=True, key="sb_btn_pau"):
-            handle_ponto_action("inicio_pausa", datetime.now().strftime("%H:%M:%S"))
+            handle_ponto_action("inicio_pausa", now_br().strftime("%H:%M:%S"))
 
         if st.button("RETORNAR PAUSA", disabled=not pode_ret, use_container_width=True, key="sb_btn_ret"):
-            handle_ponto_action("fim_pausa", datetime.now().strftime("%H:%M:%S"))
+            handle_ponto_action("fim_pausa", now_br().strftime("%H:%M:%S"))
 
         if st.button("BATER SAÍDA", disabled=not pode_sai, use_container_width=True, key="sb_btn_sai", type="primary" if pode_sai else "secondary"):
-            handle_ponto_action("saida", datetime.now().strftime("%H:%M:%S"))
+            handle_ponto_action("saida", now_br().strftime("%H:%M:%S"))
 
     st.divider()
-    st.caption(f"Base de dados: `{os.path.basename(DEFAULT_DATA_PATH)}`")
+    st.caption(f"Base de dados: `{os.path.basename(DEFAULT_DATA_PATH)}` • Sincronizado Google Sheets")
 
 # -------------------------------------------------------------
 # PROCESSAMENTO DOS DADOS PARA O PERÍODO SELECIONADO
@@ -461,12 +506,14 @@ with tab_manual:
         else:
             st.caption(f"Novo lançamento para {data_ajuste.strftime('%d/%m/%Y')}.")
 
-    ent_default = parse_time_str(reg_existente.get("entrada")) if reg_existente else time(9, 0)
-    ini_p_default = parse_time_str(reg_existente.get("inicio_pausa")) if reg_existente else time(12, 0)
-    fim_p_default = parse_time_str(reg_existente.get("fim_pausa")) if reg_existente else time(12, 15)
-    sai_default = parse_time_str(reg_existente.get("saida")) if reg_existente else time(15, 15)
+    ent_default = (parse_time_str(reg_existente.get("entrada")) if reg_existente and reg_existente.get("entrada") else None) or time(8, 0)
+    ini_p_default = (parse_time_str(reg_existente.get("inicio_pausa")) if reg_existente and reg_existente.get("inicio_pausa") else None) or time(12, 0)
+    fim_p_default = (parse_time_str(reg_existente.get("fim_pausa")) if reg_existente and reg_existente.get("fim_pausa") else None) or time(13, 0)
+    sai_default = (parse_time_str(reg_existente.get("saida")) if reg_existente and reg_existente.get("saida") else None) or time(14, 0)
     obs_default = reg_existente.get("observacao", "") if reg_existente else ""
-    meta_default = float(reg_existente.get("meta_dia", config.get("carga_horaria_diaria", 6.0))) if reg_existente else config.get("carga_horaria_diaria", 6.0)
+    meta_default = float(reg_existente["meta_dia"]) if (reg_existente and reg_existente.get("meta_dia") is not None) else float(config.get("carga_horaria_diaria", 6.0))
+    teve_pausa_default = bool(reg_existente and reg_existente.get("inicio_pausa"))
+    teve_saida_default = bool(reg_existente.get("saida")) if reg_existente else (data_ajuste < hoje)
 
     with col_info_ajuste:
         with st.form("form_ajuste_manual"):
@@ -476,42 +523,54 @@ with tab_manual:
             with c_f1:
                 input_entrada = st.time_input("Horário de Entrada:", value=ent_default, step=60)
                 input_ini_pausa = st.time_input("Início do Intervalo:", value=ini_p_default, step=60)
-                teve_pausa = st.checkbox("Houve intervalo de descanso?", value=bool(reg_existente and reg_existente.get("inicio_pausa")) or not reg_existente)
+                teve_pausa = st.checkbox("Houve intervalo de descanso?", value=teve_pausa_default)
 
             with c_f2:
-                input_fim_pausa = st.time_input("Fim do Intervalo:", value=fim_p_default, step=60, disabled=not teve_pausa)
+                input_fim_pausa = st.time_input("Fim do Intervalo:", value=fim_p_default, step=60)
                 input_saida = st.time_input("Horário de Saída:", value=sai_default, step=60)
-                input_meta = st.number_input("Carga do Dia (horas):", min_value=1.0, max_value=12.0, value=meta_default, step=0.5)
+                teve_saida = st.checkbox("Expediente concluído (registrar saída)?", value=teve_saida_default)
 
-            input_obs = st.text_input("Justificativa / Observação:", value=obs_default, placeholder="Ex: Ajuste por esquecimento, atendimento acadêmico...")
+            input_meta = st.number_input("Carga do Dia (horas) — use 0 para Feriado/Abono:", min_value=0.0, max_value=12.0, value=meta_default, step=0.5)
+            input_obs = st.text_input("Justificativa / Observação:", value=obs_default, placeholder="Ex: Ajuste por esquecimento, feriado nacional...")
 
             submitted = st.form_submit_button("SALVAR REGISTRO MANUAL", use_container_width=True, type="primary")
 
             if submitted:
-                if teve_pausa:
-                    if input_ini_pausa <= input_entrada:
-                        st.error("O início do intervalo deve ser posterior à entrada.")
-                        st.stop()
-                    if input_fim_pausa <= input_ini_pausa:
-                        st.error("O término do intervalo deve ser posterior ao início.")
-                        st.stop()
-                    if input_saida <= input_fim_pausa:
-                        st.error("A saída deve ser posterior ao término do intervalo.")
-                        st.stop()
+                if float(input_meta) == 0.0 and not teve_saida and "feriado" in (input_obs or "").lower():
+                    novo_reg = {
+                        "data": data_ajuste_str,
+                        "entrada": None,
+                        "inicio_pausa": None,
+                        "fim_pausa": None,
+                        "saida": None,
+                        "meta_dia": 0.0,
+                        "observacao": input_obs or "Feriado / Abono",
+                    }
                 else:
-                    if input_saida <= input_entrada:
-                        st.error("A saída deve ser posterior ao horário de entrada.")
-                        st.stop()
+                    if teve_pausa:
+                        if input_ini_pausa <= input_entrada:
+                            st.error("O início do intervalo deve ser posterior à entrada.")
+                            st.stop()
+                        if input_fim_pausa <= input_ini_pausa:
+                            st.error("O término do intervalo deve ser posterior ao início.")
+                            st.stop()
+                        if teve_saida and input_saida <= input_fim_pausa:
+                            st.error("A saída deve ser posterior ao término do intervalo.")
+                            st.stop()
+                    else:
+                        if teve_saida and input_saida <= input_entrada:
+                            st.error("A saída deve ser posterior ao horário de entrada.")
+                            st.stop()
 
-                novo_reg = {
-                    "data": data_ajuste_str,
-                    "entrada": format_time_str(input_entrada, include_seconds=True),
-                    "inicio_pausa": format_time_str(input_ini_pausa, include_seconds=True) if teve_pausa else None,
-                    "fim_pausa": format_time_str(input_fim_pausa, include_seconds=True) if teve_pausa else None,
-                    "saida": format_time_str(input_saida, include_seconds=True),
-                    "meta_dia": float(input_meta),
-                    "observacao": input_obs or "Ajuste manual",
-                }
+                    novo_reg = {
+                        "data": data_ajuste_str,
+                        "entrada": format_time_str(input_entrada, include_seconds=True),
+                        "inicio_pausa": format_time_str(input_ini_pausa, include_seconds=True) if teve_pausa else None,
+                        "fim_pausa": format_time_str(input_fim_pausa, include_seconds=True) if teve_pausa else None,
+                        "saida": format_time_str(input_saida, include_seconds=True) if teve_saida else None,
+                        "meta_dia": float(input_meta),
+                        "observacao": input_obs or "Ajuste manual",
+                    }
 
                 st.session_state.db["registros"] = upsert_record(st.session_state.db["registros"], novo_reg)
                 save_database(st.session_state.db)

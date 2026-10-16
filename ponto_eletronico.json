@@ -8,9 +8,10 @@
       "Quinta-feira",
       "Sexta-feira"
     ],
-    "nome_estagiario": "Estagiário(a)",
+    "nome_estagiario": "Carlos Henrique da Luz Pizzi",
     "nome_supervisor": "Gestor(a) / Supervisor(a)",
-    "empresa_setor": "ICMC / USP",
+    "empresa_setor": "605001",
+    "usuario_estagiario": "carlos",
     "pin_estagiario": "1122"
   },
   "registros": [
@@ -133,9 +134,18 @@
     },
     {
       "data": "2026-10-15",
-      "entrada": "08:12:50",
-      "inicio_pausa": "12:22:56",
-      "fim_pausa": "13:10:17",
+      "entrada": "08:12:00",
+      "inicio_pausa": "12:22:00",
+      "fim_pausa": "13:10:00",
+      "saida": "14:00:00",
+      "meta_dia": 6.0,
+      "observacao": "Registro via Ponto Rápido"
+    },
+    {
+      "data": "2026-10-16",
+      "entrada": "08:19:57",
+      "inicio_pausa": null,
+      "fim_pausa": null,
       "saida": null,
       "meta_dia": 6.0,
       "observacao": "Registro via Ponto Rápido"

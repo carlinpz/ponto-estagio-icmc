@@ -116,6 +116,28 @@ def test_all():
     assert "João" in html_fusp
     print("✓ Teste 10 passou: Geração do Boletim Oficial de Frequência FUSP")
 
+    # Teste 11: Feriado com meta_dia = 0.0 e filtro de CONFIG_JSON
+    holiday_records = [
+        {"data": "2026-10-12", "entrada": None, "inicio_pausa": None, "fim_pausa": None, "saida": None, "meta_dia": 0.0, "observacao": "Feriado"},
+        {"data": "CONFIG_JSON", "entrada": None, "inicio_pausa": None, "fim_pausa": None, "saida": None, "meta_dia": 0.0, "observacao": '{"usuario_estagiario": "carlos"}'},
+    ]
+    df_hol = process_records_dataframe(holiday_records, 6.0)
+    assert len(df_hol) == 1, f"CONFIG_JSON deveria ser ignorado, obtido {len(df_hol)}"
+    assert df_hol.iloc[0]["Status"] == "Feriado / Abono"
+    assert df_hol.iloc[0]["Meta (h)"] == 0.0
+    print("✓ Teste 11 passou: Tratamento de feriado (meta 0.0) e filtro de CONFIG_JSON")
+
+    # Teste 12: Persistência de usuário e senha e geração de token
+    from components import compute_auth_token
+    from storage import _merge_configs, DEFAULT_CONFIG
+    merged = _merge_configs(DEFAULT_CONFIG, {"usuario_estagiario": "", "pin_estagiario": ""})
+    assert merged["usuario_estagiario"] == "carlos"
+    assert merged["pin_estagiario"] == "1122"
+    tok = compute_auth_token("carlos", "1122")
+    assert len(tok) == 16
+    assert tok == compute_auth_token("CARLOS ", " 1122 ")
+    print("✓ Teste 12 passou: Autenticação por usuário/senha e proteção contra perda de credenciais")
+
     print("TODOS OS TESTES PASSARAM COM SUCESSO! 🎉")
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Contém dashboard de métricas, gráficos Plotly refinados, registro rápido e p
 """
 
 from datetime import datetime, date, time
+import hashlib
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import pandas as pd
@@ -19,8 +20,16 @@ from calculations import (
     generate_printable_timesheet_html,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
+    now_br,
+    today_br,
 )
 from theme import ICMC_COLORS, get_knot_svg_html, render_html
+
+
+def compute_auth_token(usuario: str, senha: str) -> str:
+    """Gera token de sessão verificável para manter o login ativo após atualizar a página."""
+    raw = f"icmc_auth:{usuario.strip().lower()}:{senha.strip()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
@@ -134,7 +143,7 @@ def render_quick_registration_panel(
     """
     Renderiza o painel de registro rápido com botões de textura metálica e rótulos limpos.
     """
-    agora = datetime.now()
+    agora = now_br()
     hora_atual_str = agora.strftime("%H:%M:%S")
 
     entrada = registro_hoje.get("entrada") if registro_hoje else None
@@ -212,21 +221,21 @@ def render_quick_registration_panel(
 
     with b_col1:
         if st.button("REGISTRAR ENTRADA", use_container_width=True, disabled=not pode_entrada, type="primary" if pode_entrada else "secondary"):
-            on_register_callback("entrada", hora_atual_str)
+            on_register_callback("entrada", now_br().strftime("%H:%M:%S"))
 
     with b_col2:
         if st.button("INICIAR PAUSA", use_container_width=True, disabled=not pode_pausa):
-            on_register_callback("inicio_pausa", hora_atual_str)
+            on_register_callback("inicio_pausa", now_br().strftime("%H:%M:%S"))
 
     with b_col3:
         if st.button("RETORNAR PAUSA", use_container_width=True, disabled=not pode_retorno):
-            on_register_callback("fim_pausa", hora_atual_str)
+            on_register_callback("fim_pausa", now_br().strftime("%H:%M:%S"))
 
     with b_col4:
         if st.button("REGISTRAR SAÍDA", use_container_width=True, disabled=not pode_saida, type="primary" if pode_saida else "secondary"):
-            on_register_callback("saida", hora_atual_str)
+            on_register_callback("saida", now_br().strftime("%H:%M:%S"))
 
-    with st.expander("Marcações registradas para hoje (" + date.today().strftime("%d/%m/%Y") + ")", expanded=False):
+    with st.expander("Marcações registradas para hoje (" + today_br().strftime("%d/%m/%Y") + ")", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Entrada", entrada or "--:--:--")
         c2.metric("Início Pausa", ini_pausa or "--:--:--")
@@ -351,7 +360,7 @@ def render_manager_screen(
     """
     Renderiza o painel executivo consolidado da chefia com design minimalista metálico.
     """
-    hoje = date.today()
+    hoje = today_br()
     hoje_str = hoje.strftime("%Y-%m-%d")
 
     nome_estagiario = config.get("nome_estagiario", "Estagiário(a)")
@@ -501,7 +510,7 @@ def render_manager_screen(
     prefixo_mes = f"{ano:04d}-{mes:02d}"
     issues_mes = [
         iss for iss in issues
-        if any(r.get("data", "").startswith(prefixo_mes) and r.get("data", "").endswith(iss["data"][:2]) for r in registros)
+        if iss.get("raw_date", "").startswith(prefixo_mes)
     ]
 
     st.markdown("#### AUDITORIA & CONFORMIDADE COM A LEI DO ESTÁGIO")
@@ -580,10 +589,11 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
     """
     Exibe a tela inicial de seleção de perfil.
     - Chefia: acesso direto com um clique, sem senha (read-only).
-    - Estagiário: cadastra seu PIN pessoal no primeiro acesso ou entra com seu PIN (lembrado automaticamente via query_params).
+    - Estagiário: acesso autenticado por Usuário e Senha, com opção de alterar credenciais.
     """
     knot_svg = get_knot_svg_html(size=44)
-    pin_cadastrado = str(config.get("pin_estagiario", "")).strip()
+    usuario_cadastrado = str(config.get("usuario_estagiario", "")).strip() or "carlos"
+    pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
 
     render_html(
         f"""
@@ -631,6 +641,8 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
                 st.session_state["perfil_ativo"] = "gestao"
                 st.query_params["acesso"] = "gestao"
+                if "token" in st.query_params:
+                    del st.query_params["token"]
                 st.rerun()
 
         with c_estag:
@@ -647,38 +659,55 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                         Área diária do estagiário para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes manuais.
                     </p>
                     <div style="margin: 10px 0; padding: 6px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.75rem; color: {ICMC_COLORS['copper_amber']};">
-                        Você só precisará entrar com o PIN uma única vez neste navegador.
+                        Acesso protegido com seu usuário e senha pessoais sincronizados na nuvem.
                     </div>
                 </div>
                 """
             )
-            if not pin_cadastrado:
-                with st.form("form_register_pin_estag"):
-                    st.caption("Primeiro acesso: cadastre o PIN que você usará para entrar.")
-                    pin_novo = st.text_input("Definir Novo PIN de Acesso:", type="password", placeholder="Digite uma senha ou PIN...")
-                    pin_confirma = st.text_input("Confirmar Novo PIN:", type="password", placeholder="Confirme o PIN digitado...")
-                    btn_cadastrar = st.form_submit_button("CADASTRAR PIN E ACESSAR", use_container_width=True, type="primary")
-                    if btn_cadastrar:
-                        if not pin_novo.strip():
-                            st.error("Por favor, digite um PIN válido.")
-                        elif pin_novo.strip() != pin_confirma.strip():
-                            st.error("Os PINs informados não coincidem. Digite novamente.")
+
+            with st.form("form_login_estag"):
+                usuario_input = st.text_input("Usuário:", placeholder="Digite seu usuário...")
+                pin_input = st.text_input("Senha:", type="password", placeholder="Digite sua senha...")
+                btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
+                if btn_estag:
+                    if (
+                        usuario_input.strip().lower() == usuario_cadastrado.lower()
+                        and pin_input.strip() == pin_cadastrado
+                    ):
+                        st.session_state["perfil_ativo"] = "estagiario"
+                        st.session_state["autenticado_estagiario"] = True
+                        st.query_params["acesso"] = "estagiario"
+                        st.query_params["token"] = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+                        st.rerun()
+                    else:
+                        st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
+
+            with st.expander("Alterar Usuário ou Senha de Acesso", expanded=False):
+                with st.form("form_change_credentials_welcome"):
+                    st.caption("Informe a senha atual para definir um novo usuário e/ou nova senha.")
+                    senha_atual_inp = st.text_input("Senha Atual:", type="password", placeholder="Digite a senha atual...")
+                    novo_user_inp = st.text_input("Novo Usuário:", value=usuario_cadastrado, placeholder="Ex: carlos")
+                    nova_senha_inp = st.text_input("Nova Senha:", type="password", placeholder="Digite a nova senha...")
+                    confirma_senha_inp = st.text_input("Confirmar Nova Senha:", type="password", placeholder="Confirme a nova senha...")
+                    btn_salvar_cred = st.form_submit_button("SALVAR NOVO USUÁRIO / SENHA", use_container_width=True)
+                    if btn_salvar_cred:
+                        if senha_atual_inp.strip() != pin_cadastrado:
+                            st.error("A senha atual informada está incorreta.")
+                        elif not novo_user_inp.strip():
+                            st.error("O nome de usuário não pode ficar em branco.")
+                        elif not nova_senha_inp.strip():
+                            st.error("A nova senha não pode ficar em branco.")
+                        elif nova_senha_inp.strip() != confirma_senha_inp.strip():
+                            st.error("A nova senha e a confirmação não coincidem.")
                         else:
-                            config["pin_estagiario"] = pin_novo.strip()
+                            config["usuario_estagiario"] = novo_user_inp.strip()
+                            config["pin_estagiario"] = nova_senha_inp.strip()
                             if on_save_config:
                                 on_save_config(config)
                             st.session_state["perfil_ativo"] = "estagiario"
+                            st.session_state["autenticado_estagiario"] = True
                             st.query_params["acesso"] = "estagiario"
+                            st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
+                            st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
                             st.rerun()
-            else:
-                with st.form("form_login_estag"):
-                    pin_input = st.text_input("PIN de Acesso:", type="password", placeholder="Digite seu PIN...")
-                    btn_estag = st.form_submit_button("ACESSAR MEU PONTO", use_container_width=True, type="primary")
-                    if btn_estag:
-                        if pin_input.strip() == pin_cadastrado:
-                            st.session_state["perfil_ativo"] = "estagiario"
-                            st.query_params["acesso"] = "estagiario"
-                            st.rerun()
-                        else:
-                            st.error("PIN incorreto. Tente novamente.")
 

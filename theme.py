@@ -255,14 +255,18 @@ def inject_custom_theme():
     # 2. Canvas fixo no fundo (position: fixed; inset: 0; z-index: -1; pointer-events: none;)
     # com animação fluida 60fps de rede neural e interação sutil com o mouse
     canvas_script = """
-    <canvas id="neural-bg" style="position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: -1; pointer-events: none;"></canvas>
     <script>
     (function() {
+        let canvas = document.getElementById("neural-bg-global");
+        if (!canvas) {
+            canvas = document.createElement("canvas");
+            canvas.id = "neural-bg-global";
+            canvas.style.cssText = "position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: -1; pointer-events: none;";
+            document.body.prepend(canvas);
+        }
         if (window._neuralNetworkActive) return;
         window._neuralNetworkActive = true;
 
-        const canvas = document.getElementById("neural-bg");
-        if (!canvas) return;
         const ctx = canvas.getContext("2d");
 
         let width = canvas.width = window.innerWidth;
@@ -301,7 +305,7 @@ def inject_custom_theme():
             particles.push({
                 x: Math.random() * width,
                 y: Math.random() * height,
-                vx: (Math.random() - 0.5) * 0.35, // Velocidade lenta, orgânica e fluida
+                vx: (Math.random() - 0.5) * 0.35,
                 vy: (Math.random() - 0.5) * 0.35,
                 radius: Math.random() * 1.5 + 2.0,
                 color: col
@@ -319,13 +323,11 @@ def inject_custom_theme():
                 p.x += p.vx;
                 p.y += p.vy;
 
-                // Transição contínua entre as bordas da tela
                 if (p.x < -10) p.x = width + 10;
                 if (p.x > width + 10) p.x = -10;
                 if (p.y < -10) p.y = height + 10;
                 if (p.y > height + 10) p.y = -10;
 
-                // Interação suave de repulsão com o mouse
                 if (mouse.x !== null && mouse.y !== null) {
                     const dx = mouse.x - p.x;
                     const dy = mouse.y - p.y;
@@ -337,13 +339,11 @@ def inject_custom_theme():
                     }
                 }
 
-                // Desenha os pontos com opacidade exatamente 0.4
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
                 ctx.fillStyle = "rgba(" + p.color.r + ", " + p.color.g + ", " + p.color.b + ", 0.4)";
                 ctx.fill();
 
-                // Conexões com opacidade baixa entre 0.15 e 0.25 para não poluir
                 for (let j = i + 1; j < particles.length; j++) {
                     const p2 = particles[j];
                     const dx = p.x - p2.x;
@@ -373,7 +373,7 @@ def inject_custom_theme():
     """
     st.html(canvas_script, unsafe_allow_javascript=True)
 
-    # 3. Relógio em tempo real contínuo (24/7, atualizado a cada segundo via DOM)
+    # 3. Relógio em tempo real contínuo (24/7, atualizado a cada 250ms via DOM)
     clock_script = """
     <script>
     (function() {
@@ -399,9 +399,10 @@ def inject_custom_theme():
         }
 
         tickLiveClock();
-        if (!window._liveClockInterval) {
-            window._liveClockInterval = setInterval(tickLiveClock, 1000);
+        if (window._liveClockInterval) {
+            clearInterval(window._liveClockInterval);
         }
+        window._liveClockInterval = setInterval(tickLiveClock, 250);
     })();
     </script>
     """

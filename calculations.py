@@ -183,11 +183,16 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
             "Saldo (h)", "Saldo Formatado", "Status"
         ])
 
-    rows = []
+    # Deduplica registros mantendo sempre o último registro válido de cada data
+    dedup_map: Dict[str, Dict[str, Any]] = {}
     for r in records:
-        data_str = r.get("data", "")
-        if not data_str or data_str in ("CONFIG_JSON", "__CONFIG__"):
+        d_s = str(r.get("data", "")).strip()
+        if not d_s or d_s in ("CONFIG_JSON", "__CONFIG__"):
             continue
+        dedup_map[d_s] = r
+
+    rows = []
+    for data_str, r in dedup_map.items():
         try:
             d_obj = datetime.strptime(data_str, "%Y-%m-%d").date()
             data_formatada = d_obj.strftime("%d/%m/%Y")
@@ -247,9 +252,9 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
         })
 
     df = pd.DataFrame(rows)
-    # Ordenar por data cronológica
+    # Ordenar por data cronológica e garantir unicidade
     if not df.empty and "date_obj" in df.columns:
-        df = df.sort_values(by="raw_date", ascending=True).reset_index(drop=True)
+        df = df.drop_duplicates(subset=["raw_date"], keep="last").sort_values(by="raw_date", ascending=True).reset_index(drop=True)
         # Calcula saldo acumulado para dias concluídos
         mask_concluido = df["Status"] == "Concluído"
         df["Saldo Acumulado (h)"] = 0.0
@@ -280,10 +285,14 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
     issues = []
     hoje = today_br()
 
+    dedup_map: Dict[str, Dict[str, Any]] = {}
     for r in records:
-        data_str = r.get("data", "")
-        if not data_str or data_str in ("CONFIG_JSON", "__CONFIG__"):
+        d_s = str(r.get("data", "")).strip()
+        if not d_s or d_s in ("CONFIG_JSON", "__CONFIG__"):
             continue
+        dedup_map[d_s] = r
+
+    for data_str, r in dedup_map.items():
         try:
             d_obj = datetime.strptime(data_str, "%Y-%m-%d").date()
             data_fmt = d_obj.strftime("%d/%m/%Y")

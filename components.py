@@ -551,38 +551,22 @@ def render_manager_screen(
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    st.markdown("#### DOCUMENTAÇÃO INSTITUCIONAL & ASSINATURA")
-    html_timesheet = generate_printable_timesheet_html(df_mes, config, mes_nome, ano)
+    st.markdown("#### BOLETIM DE FREQUÊNCIA OFICIAL (FUSP)")
     fusp_html = generate_fusp_timesheet_html(registros, config, ano, mes)
 
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        st.download_button(
-            label="BAIXAR BOLETIM FUSP PREENCHIDO (HTML / PDF)",
-            data=fusp_html.encode("utf-8"),
-            file_name=f"boletim_fusp_{nome_estagiario.replace(' ', '_')}_{ano}_{mes:02d}.html",
-            mime="text/html",
-            use_container_width=True,
-            type="primary",
-            help="Modelo oficial da Fundação de Apoio à USP (FUSP) para entrega até dia 22.",
-        )
-    with col_btn2:
-        st.download_button(
-            label="BAIXAR ESPELHO GERAL DE PONTO (HTML / PDF)",
-            data=html_timesheet.encode("utf-8"),
-            file_name=f"folha_ponto_{nome_estagiario.replace(' ', '_')}_{ano}_{mes:02d}.html",
-            mime="text/html",
-            use_container_width=True,
-            help="Relatório detalhado com métricas e saldos acumulados de horas.",
-        )
+    st.download_button(
+        label="BAIXAR BOLETIM FUSP PREENCHIDO (HTML / PDF)",
+        data=fusp_html.encode("utf-8"),
+        file_name=f"boletim_fusp_{nome_estagiario.replace(' ', '_')}_{ano}_{mes:02d}.html",
+        mime="text/html",
+        use_container_width=True,
+        type="primary",
+        help="Modelo oficial da Fundação de Apoio à USP (FUSP) para entrega até dia 22.",
+    )
 
-    with st.expander("Visualizar Prévia do Boletim FUSP Preenchido", expanded=False):
+    with st.expander("Visualizar Prévia do Boletim FUSP Preenchido", expanded=True):
         import streamlit.components.v1 as st_components
-        st_components.html(fusp_html, height=650, scrolling=True)
-
-    with st.expander("Visualizar Prévia do Espelho Geral A4", expanded=False):
-        import streamlit.components.v1 as st_components
-        st_components.html(html_timesheet, height=600, scrolling=True)
+        st_components.html(fusp_html, height=680, scrolling=True)
 
 
 def render_welcome_screen(config: Dict[str, Any], on_save_config=None):

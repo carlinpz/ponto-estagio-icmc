@@ -21,7 +21,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "Sexta-feira",
     ],
     "nome_estagiario": "Carlos Henrique da Luz Pizzi",
-    "nome_supervisor": "Gestor(a) / Supervisor(a)",
+    "nome_supervisor": "Maria Fernanda Marreta",
     "empresa_setor": "605001",
     "usuario_estagiario": "carlos",
     "pin_estagiario": "1122",
@@ -29,6 +29,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 DEFAULT_SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1-1XDAVUDdAGK-OUfCog8bDizN8Ax-oeHfl81rHlxfmI/export?format=csv"
 DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyq1Mkm5VjbTd-A48DyCkNBnWmzRbC4fsVjqFuumBHLep7JNaqGA33jHJUjAz023jO8xA/exec"
+
+
+def _deduplicate_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove registros duplicados da mesma data, mantendo sempre a versão mais recente."""
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for r in records:
+        d_val = str(r.get("data", "")).strip()
+        if not d_val or d_val in ("CONFIG_JSON", "__CONFIG__"):
+            continue
+        dedup[d_val] = r
+    result = list(dedup.values())
+    result.sort(key=lambda x: str(x.get("data", "")))
+    return result
 
 
 def _merge_configs(base: Dict[str, Any], override: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -42,6 +55,8 @@ def _merge_configs(base: Dict[str, Any], override: Optional[Dict[str, Any]]) -> 
             if v is not None and str(v).strip() != "":
                 if k == "nome_estagiario" and str(v).strip() == "Estagiário(a)" and result.get(k) != "Estagiário(a)":
                     continue
+                if k == "nome_supervisor" and str(v).strip() == "Gestor(a) / Supervisor(a)" and result.get(k) != "Gestor(a) / Supervisor(a)":
+                    continue
                 if k == "empresa_setor" and str(v).strip() == "ICMC / USP" and result.get(k) == "605001":
                     continue
                 result[k] = v
@@ -50,6 +65,8 @@ def _merge_configs(base: Dict[str, Any], override: Optional[Dict[str, Any]]) -> 
         for k, v in override.items():
             if v is not None and str(v).strip() != "":
                 if k == "nome_estagiario" and str(v).strip() == "Estagiário(a)" and result.get(k) != "Estagiário(a)":
+                    continue
+                if k == "nome_supervisor" and str(v).strip() == "Gestor(a) / Supervisor(a)" and result.get(k) != "Gestor(a) / Supervisor(a)":
                     continue
                 if k == "empresa_setor" and str(v).strip() == "ICMC / USP" and result.get(k) == "605001":
                     continue
@@ -222,7 +239,7 @@ def load_database_from_sheet_csv(sheet_url: str = DEFAULT_SPREADSHEET_CSV_URL) -
             "observacao": obs_str,
         })
 
-    return {"config": cloud_cfg, "registros": records}
+    return {"config": cloud_cfg, "registros": _deduplicate_records(records)}
 
 
 def load_database_from_apps_script(url: str) -> Dict[str, Any]:
@@ -268,17 +285,14 @@ def load_database_from_apps_script(url: str) -> Dict[str, Any]:
                 "observacao": obs_str,
             })
 
-        return {"config": cloud_cfg, "registros": cleaned_records}
+        return {"config": cloud_cfg, "registros": _deduplicate_records(cleaned_records)}
     raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
 
 
 def save_database_to_apps_script(url: str, data: Dict[str, Any]):
     """Envia registros e configurações (em linha metadado CONFIG_JSON) para a planilha via Apps Script."""
     import requests
-    clean_regs = [
-        r for r in data.get("registros", [])
-        if str(r.get("data", "")).strip() not in ("CONFIG_JSON", "__CONFIG__", "")
-    ]
+    clean_regs = _deduplicate_records(data.get("registros", []))
     cfg_row = {
         "data": "CONFIG_JSON",
         "entrada": "",
@@ -435,10 +449,7 @@ def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
             with open(filepath, "r", encoding="utf-8") as f:
                 d = json.load(f)
                 if isinstance(d, dict):
-                    local_records = [
-                        r for r in d.get("registros", [])
-                        if str(r.get("data", "")).strip() not in ("CONFIG_JSON", "__CONFIG__", "")
-                    ]
+                    local_records = _deduplicate_records(d.get("registros", []))
                     if "config" in d and isinstance(d["config"], dict):
                         local_cfg = _merge_configs(local_cfg, d["config"])
         except Exception:
@@ -467,10 +478,7 @@ def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
 
     # 3. Se temos dados da nuvem e eles são consistentes, mescla com configurações locais
     if cloud_data and cloud_data.get("registros"):
-        cloud_records = [
-            r for r in cloud_data.get("registros", [])
-            if str(r.get("data", "")).strip() not in ("CONFIG_JSON", "__CONFIG__", "")
-        ]
+        cloud_records = _deduplicate_records(cloud_data.get("registros", []))
         if len(cloud_records) > 0:
             merged_cfg = _merge_configs(local_cfg, cloud_data.get("config", {}))
             result_data = {
@@ -501,12 +509,9 @@ def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH, sync_
     Salva os dados de forma segura no JSON local e, se sync_cloud for True e a nuvem estiver ativa,
     sincroniza em tempo real com o Google Sheets.
     """
-    # Garante que CONFIG_JSON nunca fique poluindo a lista em memória/JSON local
+    # Garante que CONFIG_JSON e duplicatas nunca fiquem na lista em memória/JSON local
     if "registros" in data and isinstance(data["registros"], list):
-        data["registros"] = [
-            r for r in data["registros"]
-            if str(r.get("data", "")).strip() not in ("CONFIG_JSON", "__CONFIG__", "")
-        ]
+        data["registros"] = _deduplicate_records(data["registros"])
     if "config" in data and isinstance(data["config"], dict):
         data["config"] = _merge_configs(DEFAULT_CONFIG, data["config"])
 

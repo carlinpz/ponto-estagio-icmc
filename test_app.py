@@ -127,8 +127,9 @@ def test_all():
     assert df_hol.iloc[0]["Meta (h)"] == 0.0
     print("✓ Teste 11 passou: Tratamento de feriado (meta 0.0) e filtro de CONFIG_JSON")
 
-    # Teste 12: Persistência de usuário e senha e geração de token
-    from components import compute_auth_token
+    # Teste 12: Persistência de usuário e senha, geração de token e cookie de "Lembrar login"
+    import streamlit as st
+    from components import compute_auth_token, agendar_cookie_login
     from storage import _merge_configs, DEFAULT_CONFIG
     merged = _merge_configs(DEFAULT_CONFIG, {"usuario_estagiario": "", "pin_estagiario": ""})
     assert merged["usuario_estagiario"] == "carlos"
@@ -136,7 +137,14 @@ def test_all():
     tok = compute_auth_token("carlos", "1122")
     assert len(tok) == 16
     assert tok == compute_auth_token("CARLOS ", " 1122 ")
-    print("✓ Teste 12 passou: Autenticação por usuário/senha e proteção contra perda de credenciais")
+    agendar_cookie_login(tok)
+    assert st.session_state.get("_cookie_acao") == "set"
+    assert st.session_state.get("_cookie_valor") == tok
+    assert st.session_state.get("login_lembrado") is True
+    agendar_cookie_login(None)
+    assert st.session_state.get("_cookie_acao") == "clear"
+    assert st.session_state.get("login_lembrado") is False
+    print("✓ Teste 12 passou: Autenticação por usuário/senha, cookie lembrar login e proteção de credenciais")
 
     print("TODOS OS TESTES PASSARAM COM SUCESSO! 🎉")
 

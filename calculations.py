@@ -338,6 +338,49 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
     return issues
 
 
+# Observações geradas automaticamente pelo sistema que não devem aparecer nos boletins impressos.
+OBSERVACOES_OCULTAS_BOLETIM = {"registro via ponto rápido"}
+
+
+def limpar_observacao_boletim(obs: Any) -> str:
+    """Retorna a observação para exibição no boletim, omitindo as automáticas do sistema."""
+    if obs is None or (isinstance(obs, float) and pd.isna(obs)):
+        return ""
+    texto = str(obs).strip()
+    if texto.lower() in OBSERVACOES_OCULTAS_BOLETIM:
+        return ""
+    return texto
+
+
+# Script do botão de impressão. Quando o documento está dentro do iframe (sandbox) da
+# prévia do Streamlit, o window.print() é bloqueado ou imprime a página inteira do app.
+# Nesse caso, o documento é aberto em uma nova aba isolada e impresso de lá.
+PRINT_SCRIPT = """
+<script>
+function imprimirDocumento() {
+    var dentroDeIframe = false;
+    try { dentroDeIframe = window.self !== window.top; } catch (e) { dentroDeIframe = true; }
+    if (!dentroDeIframe) { window.print(); return; }
+
+    var html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+    var w = null;
+    try { w = window.open('', '_blank'); } catch (e) { w = null; }
+    if (!w) { window.print(); return; }
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    var imprimir = function () { w.focus(); w.print(); };
+    if (w.document.readyState === 'complete') {
+        setTimeout(imprimir, 300);
+    } else {
+        w.addEventListener('load', function () { setTimeout(imprimir, 300); });
+    }
+}
+</script>
+"""
+
+
 def generate_printable_timesheet_html(
     df_mes: pd.DataFrame,
     config: Dict[str, Any],
@@ -382,7 +425,7 @@ def generate_printable_timesheet_html(
                 <td style="text-align: center;">{row.get('Saída', '-')}</td>
                 <td style="text-align: center; font-weight: bold;">{row.get('Horas Formatadas', '-')}</td>
                 <td style="text-align: center; color: {color}; font-weight: bold;">{saldo_str}</td>
-                <td>{row.get('Observação', '') or '-'}</td>
+                <td>{limpar_observacao_boletim(row.get('Observação', '')) or '-'}</td>
             </tr>
             """
     else:
@@ -471,10 +514,11 @@ def generate_printable_timesheet_html(
     </head>
     <body>
         <div class="no-print" style="margin-bottom: 16px; text-align: right;">
-            <button onclick="window.print()" style="padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            <button onclick="imprimirDocumento()" style="padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 🖨️ Imprimir / Salvar em PDF
             </button>
         </div>
+        {PRINT_SCRIPT}
 
         <div class="title">RELATÓRIO MENSAL DE PONTO ELETRÔNICO E BANCO DE HORAS</div>
         <div class="subtitle">Controle de Jornada de Estágio — Lei Federal 11.788/2008</div>
@@ -613,7 +657,7 @@ def generate_fusp_timesheet_html(
             ini_p = (reg.get("inicio_pausa") or "")[:5]
             fim_p = (reg.get("fim_pausa") or "")[:5]
             sai = (reg.get("saida") or "")[:5]
-            obs = reg.get("observacao") or ""
+            obs = limpar_observacao_boletim(reg.get("observacao"))
         else:
             ent = ""
             ini_p = ""
@@ -622,15 +666,14 @@ def generate_fusp_timesheet_html(
             obs = ""
 
         # Estilo visual de recesso para finais de semana
+        # (o fundo fica na célula, não no <tr>: fundo em <tr> apaga as bordas na impressão do Chrome)
         if is_fim_de_semana:
-            row_style = "background-color: #f8fafc; color: #64748b;"
             cell_class = 'class="recesso"'
         else:
-            row_style = "background-color: #ffffff; color: #1e293b;"
             cell_class = 'class="normal"'
 
         trows.append(
-            f"""<tr style="{row_style}">
+            f"""<tr>
                 <td align="center" {cell_class} style="padding: 2px 4px; font-weight: 600;">{d_m}</td>
                 <td {cell_class} style="padding: 2px 6px;">{dia_nome}</td>
                 <td align="center" {cell_class} style="padding: 2px 4px;">{ent}</td>
@@ -660,12 +703,40 @@ def generate_fusp_timesheet_html(
         margin: 0;
         padding: 10px;
     }}
+    * {{
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }}
+    /* Modelo "separate" com bordas só à direita/embaixo de cada célula: no Chrome,
+       border-collapse + escala "ajustar à página" faz linhas da grade sumirem na impressão. */
     .bordasimples {{
-        border-collapse: collapse;
-        border: 1px solid #333;
+        border-collapse: separate;
+        border-spacing: 0;
+        border: 0;
+        border-top: 1px solid #333;
+        border-left: 1px solid #333;
     }}
     .bordasimples td, .bordasimples th {{
-        border: 1px solid #333;
+        border: 0;
+        border-right: 1px solid #333;
+        border-bottom: 1px solid #333;
+    }}
+    .bordasimples .cab {{
+        background: #f1f5f9;
+        font-weight: bold;
+        text-align: center;
+    }}
+    .bordasimples td.recesso {{
+        background: #f8fafc;
+        color: #64748b;
+    }}
+    .bordasimples td.normal {{
+        background: #ffffff;
+        color: #1e293b;
+    }}
+    .bordasimples tr {{
+        break-inside: avoid;
+        page-break-inside: avoid;
     }}
     .no-print {{
         margin-bottom: 12px;
@@ -690,8 +761,9 @@ def generate_fusp_timesheet_html(
 <body>
 
 <div class="no-print">
-    <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar como PDF</button>
+    <button class="btn-print" onclick="imprimirDocumento()">🖨️ Imprimir / Salvar como PDF</button>
 </div>
+{PRINT_SCRIPT}
 
 <table width="680" border="1" class="bordasimples" style="margin: 0 auto; width: 680px; font-size: 11px;">
   <tr>
@@ -718,15 +790,15 @@ def generate_fusp_timesheet_html(
 </table>
 
 <table width="680" border="1" class="bordasimples" style="margin: 6px auto 0 auto; width: 680px; font-size: 10px; line-height: 1.2;">
-  <tr style="background: #f1f5f9; font-weight: bold; text-align: center;">
-    <td colspan="2" rowspan="2" style="padding: 3px 4px; width: 140px;">Dia da Semana</td>
-    <td colspan="4" style="padding: 3px 4px;">Horário de</td>
-    <td width="160" rowspan="2" style="padding: 3px 4px;">Observação</td>
+  <tr>
+    <td class="cab" colspan="2" rowspan="2" style="padding: 3px 4px; width: 140px;">Dia da Semana</td>
+    <td class="cab" colspan="4" style="padding: 3px 4px;">Horário de</td>
+    <td class="cab" width="160" rowspan="2" style="padding: 3px 4px;">Observação</td>
   </tr>
-  <tr style="background: #f1f5f9; font-weight: bold; text-align: center;">
-    <td width="72" style="padding: 3px 4px;">Entrada</td>
-    <td colspan="2" style="padding: 3px 4px; width: 144px;">Repouso</td>
-    <td width="72" style="padding: 3px 4px;">Saída</td>
+  <tr>
+    <td class="cab" width="72" style="padding: 3px 4px;">Entrada</td>
+    <td class="cab" colspan="2" style="padding: 3px 4px; width: 144px;">Repouso</td>
+    <td class="cab" width="72" style="padding: 3px 4px;">Saída</td>
   </tr>
   {trows_html}
 </table>

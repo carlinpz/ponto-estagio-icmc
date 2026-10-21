@@ -32,6 +32,65 @@ def compute_auth_token(usuario: str, senha: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+# Cookie "Lembrar login": guarda o token no navegador para não pedir usuário/senha a cada acesso.
+# Como o token é derivado do usuário + senha, trocar a senha invalida automaticamente o cookie.
+AUTH_COOKIE_NAME = "ponto_icmc_auth"
+AUTH_COOKIE_DIAS = 30
+
+
+def get_auth_cookie() -> Optional[str]:
+    """Lê o token de login lembrado (cookie enviado pelo navegador ao abrir o site)."""
+    try:
+        return st.context.cookies.get(AUTH_COOKIE_NAME)
+    except Exception:
+        return None
+
+
+def agendar_cookie_login(token: Optional[str]):
+    """
+    Agenda a gravação (token) ou remoção (None) do cookie de login.
+    A escrita acontece em sync_auth_cookie() na próxima execução, pois logo após o login é feito st.rerun().
+    """
+    if token:
+        st.session_state["_cookie_acao"] = "set"
+        st.session_state["_cookie_valor"] = token
+        st.session_state["login_lembrado"] = True
+    else:
+        st.session_state["_cookie_acao"] = "clear"
+        st.session_state.pop("_cookie_valor", None)
+        st.session_state["login_lembrado"] = False
+
+
+def sync_auth_cookie():
+    """Grava/remove o cookie de login no navegador, se houver uma ação pendente."""
+    acao = st.session_state.pop("_cookie_acao", None)
+    if not acao:
+        return
+    if acao == "set":
+        valor = st.session_state.pop("_cookie_valor", "")
+        validade = f"max-age={AUTH_COOKIE_DIAS * 24 * 3600}"
+    else:
+        valor = ""
+        validade = "max-age=0"
+
+    import streamlit.components.v1 as st_components
+
+    # O componente roda num iframe do mesmo domínio: o cookie é gravado no documento principal do app.
+    st_components.html(
+        f"""
+        <script>
+        (function () {{
+            var doc = document;
+            try {{ doc = window.parent.document; }} catch (e) {{}}
+            var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
+            doc.cookie = '{AUTH_COOKIE_NAME}={valor}; path=/; {validade}; SameSite=Lax' + seguro;
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
     """
     Exibe os indicadores resumidos com estética minimalista metálica:
@@ -652,16 +711,23 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             with st.form("form_login_estag"):
                 usuario_input = st.text_input("Usuário:", placeholder="Digite seu usuário...")
                 pin_input = st.text_input("Senha:", type="password", placeholder="Digite sua senha...")
+                lembrar_input = st.checkbox(
+                    "Lembrar login neste navegador",
+                    value=True,
+                    help=f"Mantém você conectado por {AUTH_COOKIE_DIAS} dias neste navegador. Use 'Sair' para esquecer.",
+                )
                 btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
                 if btn_estag:
                     if (
                         usuario_input.strip().lower() == usuario_cadastrado.lower()
                         and pin_input.strip() == pin_cadastrado
                     ):
+                        token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
                         st.session_state["perfil_ativo"] = "estagiario"
                         st.session_state["autenticado_estagiario"] = True
                         st.query_params["acesso"] = "estagiario"
-                        st.query_params["token"] = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+                        st.query_params["token"] = token
+                        agendar_cookie_login(token if lembrar_input else None)
                         st.rerun()
                     else:
                         st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
@@ -692,6 +758,7 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                             st.session_state["autenticado_estagiario"] = True
                             st.query_params["acesso"] = "estagiario"
                             st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
+                            agendar_cookie_login(st.query_params["token"])
                             st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
                             st.rerun()
 

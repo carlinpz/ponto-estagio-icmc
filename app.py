@@ -43,6 +43,9 @@ from components import (
     render_manager_screen,
     render_welcome_screen,
     compute_auth_token,
+    get_auth_cookie,
+    agendar_cookie_login,
+    sync_auth_cookie,
 )
 
 # Configuração da página Streamlit
@@ -87,13 +90,26 @@ expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
 
 acesso_param = st.query_params.get("acesso")
 token_param = st.query_params.get("token")
+# Login lembrado: cookie gravado quando "Lembrar login neste navegador" foi marcado
+cookie_valido = get_auth_cookie() == expected_token
 
 if "perfil_ativo" not in st.session_state:
     if acesso_param in ("gestao", "chefia", "supervisor"):
         st.session_state["perfil_ativo"] = "gestao"
+        if cookie_valido:
+            # Permite voltar ao perfil de estagiário sem digitar a senha
+            st.session_state["autenticado_estagiario"] = True
+            st.session_state["login_lembrado"] = True
     elif acesso_param in ("estagiario", "estagio") and token_param == expected_token:
         st.session_state["perfil_ativo"] = "estagiario"
         st.session_state["autenticado_estagiario"] = True
+        st.session_state["login_lembrado"] = cookie_valido
+    elif cookie_valido:
+        st.session_state["perfil_ativo"] = "estagiario"
+        st.session_state["autenticado_estagiario"] = True
+        st.session_state["login_lembrado"] = True
+        st.query_params["acesso"] = "estagiario"
+        st.query_params["token"] = expected_token
     else:
         st.session_state["perfil_ativo"] = None
 
@@ -103,6 +119,9 @@ if st.session_state.get("perfil_ativo") == "estagiario" and not st.session_state
         st.session_state["autenticado_estagiario"] = True
     else:
         st.session_state["perfil_ativo"] = None
+
+# Grava/remove o cookie "Lembrar login" se houver ação pendente (após login, logout ou troca de senha)
+sync_auth_cookie()
 
 # Se nenhum perfil estiver ativo, exibe a tela inicial de seleção e login:
 if st.session_state["perfil_ativo"] is None:
@@ -159,6 +178,7 @@ with st.sidebar:
             if st.button("Sair", use_container_width=True, key="btn_logout", help="Encerrar sessão e voltar para a tela de login"):
                 st.session_state["perfil_ativo"] = None
                 st.session_state["autenticado_estagiario"] = False
+                agendar_cookie_login(None)  # esquece o login lembrado neste navegador
                 st.query_params.clear()
                 st.rerun()
 
@@ -274,6 +294,9 @@ with st.sidebar:
                 config["pin_estagiario"] = novo_pin.strip() if novo_pin.strip() else pin_cadastrado
                 save_database(db)
                 st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
+                if st.session_state.get("login_lembrado"):
+                    # Credenciais mudaram: atualiza o cookie "Lembrar login" com o novo token
+                    agendar_cookie_login(st.query_params["token"])
                 st.toast("Configurações e credenciais salvas na nuvem com sucesso.")
                 st.rerun()
 

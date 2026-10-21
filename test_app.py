@@ -128,7 +128,23 @@ def test_all():
     print("✓ Teste 11 passou: Tratamento de feriado (meta 0.0) e filtro de CONFIG_JSON")
 
     # Teste 12: Persistência de usuário e senha, geração de token e cookie de "Lembrar login"
-    import streamlit as st
+    import sys
+    from unittest.mock import MagicMock
+    if "streamlit" not in sys.modules:
+        try:
+            import streamlit as st
+        except ImportError:
+            st = MagicMock()
+            st.session_state = {}
+            sys.modules["streamlit"] = st
+    else:
+        st = sys.modules["streamlit"]
+    if "plotly" not in sys.modules:
+        try:
+            import plotly
+        except ImportError:
+            sys.modules["plotly"] = MagicMock()
+            sys.modules["plotly.graph_objects"] = MagicMock()
     from components import compute_auth_token, agendar_cookie_login
     from storage import _merge_configs, DEFAULT_CONFIG
     merged = _merge_configs(DEFAULT_CONFIG, {"usuario_estagiario": "", "pin_estagiario": ""})

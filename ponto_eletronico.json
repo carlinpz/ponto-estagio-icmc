@@ -144,8 +144,35 @@
     {
       "data": "2026-10-16",
       "entrada": "08:15:00",
-      "inicio_pausa": null,
-      "fim_pausa": null,
+      "inicio_pausa": "12:04:32",
+      "fim_pausa": "13:03:46",
+      "saida": "15:16:37",
+      "meta_dia": 6.0,
+      "observacao": "Registro via Ponto Rápido"
+    },
+    {
+      "data": "2026-10-19",
+      "entrada": "08:03:35",
+      "inicio_pausa": "12:09:53",
+      "fim_pausa": "13:04:03",
+      "saida": "15:02:42",
+      "meta_dia": 6.0,
+      "observacao": "Registro via Ponto Rápido"
+    },
+    {
+      "data": "2026-10-20",
+      "entrada": "08:22:55",
+      "inicio_pausa": "12:16:07",
+      "fim_pausa": "13:07:23",
+      "saida": "15:22:55",
+      "meta_dia": 6.0,
+      "observacao": "Registro via Ponto Rápido"
+    },
+    {
+      "data": "2026-10-21",
+      "entrada": "08:11:49",
+      "inicio_pausa": "12:04:28",
+      "fim_pausa": "13:00:05",
       "saida": null,
       "meta_dia": 6.0,
       "observacao": "Registro via Ponto Rápido"

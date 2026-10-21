@@ -659,28 +659,99 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
     pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
     expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
 
-    # CSS exclusivo para travar a tela de login em 100vh (sem barra de rolagem) e compactar espaçamentos
+    # CSS exclusivo para travar a tela de login em 100vh no desktop e permitir rolagem suave e centralizada no celular
     render_html(
-        """
+        f"""
         <style>
-        html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
-            overflow: hidden !important;
-            height: 100vh !important;
-            max-height: 100vh !important;
-        }
-        [data-testid="stMainBlockContainer"], .block-container {
-            padding-top: 2.2rem !important;
-            padding-bottom: 0rem !important;
-            max-height: 100vh !important;
-            overflow: hidden !important;
-        }
-        [data-testid="stHeader"] {
+        [data-testid="stHeader"] {{
             background: transparent !important;
             pointer-events: auto;
-        }
-        div[data-testid="stForm"] {
-            padding: 12px 16px !important;
-        }
+        }}
+
+        /* Container principal centralizado horizontalmente */
+        [data-testid="stMainBlockContainer"], .block-container {{
+            max-width: 880px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+        }}
+
+        .welcome-title {{
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: {ICMC_COLORS['text_primary']};
+            line-height: 1.25;
+        }}
+
+        .welcome-sub {{
+            font-size: 0.8rem;
+            color: {ICMC_COLORS['text_secondary']};
+            margin-top: 2px;
+        }}
+
+        /* DESKTOP (telas >= 769px com altura >= 640px): tela fixa e centralizada em 100vh sem barra de rolagem */
+        @media (min-width: 769px) and (min-height: 640px) {{
+            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
+                overflow: hidden !important;
+                height: 100vh !important;
+                max-height: 100vh !important;
+            }}
+            [data-testid="stMainBlockContainer"], .block-container {{
+                padding-top: 2.2rem !important;
+                padding-bottom: 0.5rem !important;
+                max-height: 100vh !important;
+                overflow: hidden !important;
+            }}
+            div[data-testid="stForm"] {{
+                padding: 12px 16px !important;
+            }}
+        }}
+
+        /* CELULAR E TELAS MENORES OU BAIXAS: permite rolagem vertical suave, espaçamento seguro e layout centralizado */
+        @media (max-width: 768px), (max-height: 639px) {{
+            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+                height: auto !important;
+                min-height: 100% !important;
+                max-height: none !important;
+                -webkit-overflow-scrolling: touch !important;
+            }}
+            [data-testid="stMainBlockContainer"], .block-container {{
+                padding-top: 1.2rem !important;
+                padding-bottom: 3.5rem !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                max-width: 480px !important;
+                height: auto !important;
+                max-height: none !important;
+                overflow-y: visible !important;
+                overflow-x: hidden !important;
+            }}
+            [data-testid="stHorizontalBlock"] {{
+                flex-wrap: wrap !important;
+                gap: 0.75rem !important;
+            }}
+            [data-testid="stColumn"] {{
+                width: 100% !important;
+                min-width: 100% !important;
+            }}
+            .metal-card {{
+                padding: 12px 14px !important;
+                margin-bottom: 8px !important;
+            }}
+            div[data-testid="stForm"] {{
+                padding: 10px 12px !important;
+            }}
+            .welcome-title {{
+                font-size: 1.15rem !important;
+            }}
+            .welcome-sub {{
+                font-size: 0.75rem !important;
+            }}
+        }}
         </style>
         """
     )
@@ -716,10 +787,10 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             <div style="display: flex; justify-content: center; margin-bottom: 6px;">
                 {knot_svg}
             </div>
-            <div style="font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; color: {ICMC_COLORS['text_primary']};">
+            <div class="welcome-title">
                 ICMC • UNIVERSIDADE DE SÃO PAULO
             </div>
-            <div style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; margin-top: 2px;">
+            <div class="welcome-sub">
                 Sistema Integrado de Ponto Eletrônico & Gestão de Estágio
             </div>
             <div style="margin-top: 8px;">
@@ -729,111 +800,108 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         """
     )
 
-    col_gap1, col_center, col_gap2 = st.columns([1, 8, 1])
+    c_gestor, c_estag = st.columns(2)
 
-    with col_center:
-        c_gestor, c_estag = st.columns(2)
-
-        with c_gestor:
-            render_html(
-                f"""
-                <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
-                    <div style="font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
-                        ACESSO EXECUTIVO
-                    </div>
-                    <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
-                        Visão da Chefia / Supervisão
-                    </div>
-                    <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
-                        Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
-                    </p>
-                    <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['steel_blue']};">
-                        Modo Somente Leitura (Sem risco de alterações acidentais)
-                    </div>
+    with c_gestor:
+        render_html(
+            f"""
+            <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
+                <div style="font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                    ACESSO EXECUTIVO
                 </div>
-                """
-            )
-            if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
-                st.session_state["perfil_ativo"] = "gestao"
-                st.query_params["acesso"] = "gestao"
-                if "token" in st.query_params:
-                    del st.query_params["token"]
-                st.rerun()
-
-        with c_estag:
-            render_html(
-                f"""
-                <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
-                    <div style="font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
-                        CONTROLE OPERACIONAL
-                    </div>
-                    <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
-                        Meu Ponto Pessoal
-                    </div>
-                    <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
-                        Área diária do estagiário para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes manuais.
-                    </p>
-                    <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['copper_amber']};">
-                        Acesso protegido com seu usuário e senha pessoais na nuvem.
-                    </div>
+                <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
+                    Visão da Chefia / Supervisão
                 </div>
-                """
-            )
+                <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
+                    Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
+                </p>
+                <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['steel_blue']};">
+                    Modo Somente Leitura (Sem risco de alterações acidentais)
+                </div>
+            </div>
+            """
+        )
+        if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
+            st.session_state["perfil_ativo"] = "gestao"
+            st.query_params["acesso"] = "gestao"
+            if "token" in st.query_params:
+                del st.query_params["token"]
+            st.rerun()
 
-            with st.form("form_login_estag"):
-                col_u, col_p = st.columns(2)
-                with col_u:
-                    usuario_input = st.text_input("Usuário:", placeholder="Seu usuário...")
-                with col_p:
-                    pin_input = st.text_input("Senha:", type="password", placeholder="Sua senha...")
-                lembrar_input = st.checkbox(
-                    "Lembrar meu login neste navegador",
-                    value=True,
-                    help=f"Mantém você conectado por {AUTH_COOKIE_DIAS} dias neste navegador. Clique em 'Sair' na barra lateral quando quiser desconectar.",
-                )
-                btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
-                if btn_estag:
-                    if (
-                        usuario_input.strip().lower() == usuario_cadastrado.lower()
-                        and pin_input.strip() == pin_cadastrado
-                    ):
-                        token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+    with c_estag:
+        render_html(
+            f"""
+            <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
+                <div style="font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                    CONTROLE OPERACIONAL
+                </div>
+                <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
+                    Meu Ponto Pessoal
+                </div>
+                <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
+                    Área diária do estagiário para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes manuais.
+                </p>
+                <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['copper_amber']};">
+                    Acesso protegido com seu usuário e senha pessoais na nuvem.
+                </div>
+            </div>
+            """
+        )
+
+        with st.form("form_login_estag"):
+            col_u, col_p = st.columns(2)
+            with col_u:
+                usuario_input = st.text_input("Usuário:", placeholder="Seu usuário...")
+            with col_p:
+                pin_input = st.text_input("Senha:", type="password", placeholder="Sua senha...")
+            lembrar_input = st.checkbox(
+                "Lembrar meu login neste navegador",
+                value=True,
+                help=f"Mantém você conectado por {AUTH_COOKIE_DIAS} dias neste navegador. Clique em 'Sair' na barra lateral quando quiser desconectar.",
+            )
+            btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
+            if btn_estag:
+                if (
+                    usuario_input.strip().lower() == usuario_cadastrado.lower()
+                    and pin_input.strip() == pin_cadastrado
+                ):
+                    token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+                    st.session_state["perfil_ativo"] = "estagiario"
+                    st.session_state["autenticado_estagiario"] = True
+                    st.query_params["acesso"] = "estagiario"
+                    st.query_params["token"] = token
+                    agendar_cookie_login(token if lembrar_input else None)
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
+
+        with st.popover("🔑 Alterar Usuário ou Senha de Acesso", use_container_width=True):
+            with st.form("form_change_credentials_welcome"):
+                st.caption("Informe a senha atual para definir um novo usuário e/ou nova senha.")
+                senha_atual_inp = st.text_input("Senha Atual:", type="password", placeholder="Digite a senha atual...")
+                novo_user_inp = st.text_input("Novo Usuário:", value=usuario_cadastrado, placeholder="Ex: carlos")
+                nova_senha_inp = st.text_input("Nova Senha:", type="password", placeholder="Digite a nova senha...")
+                confirma_senha_inp = st.text_input("Confirmar Nova Senha:", type="password", placeholder="Confirme a nova senha...")
+                btn_salvar_cred = st.form_submit_button("SALVAR NOVO USUÁRIO / SENHA", use_container_width=True)
+                if btn_salvar_cred:
+                    if senha_atual_inp.strip() != pin_cadastrado:
+                        st.error("A senha atual informada está incorreta.")
+                    elif not novo_user_inp.strip():
+                        st.error("O nome de usuário não pode ficar em branco.")
+                    elif not nova_senha_inp.strip():
+                        st.error("A nova senha não pode ficar em branco.")
+                    elif nova_senha_inp.strip() != confirma_senha_inp.strip():
+                        st.error("A nova senha e a confirmação não coincidem.")
+                    else:
+                        config["usuario_estagiario"] = novo_user_inp.strip()
+                        config["pin_estagiario"] = nova_senha_inp.strip()
+                        if on_save_config:
+                            on_save_config(config)
                         st.session_state["perfil_ativo"] = "estagiario"
                         st.session_state["autenticado_estagiario"] = True
                         st.query_params["acesso"] = "estagiario"
-                        st.query_params["token"] = token
-                        agendar_cookie_login(token if lembrar_input else None)
+                        st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
+                        agendar_cookie_login(st.query_params["token"])
+                        st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
                         st.rerun()
-                    else:
-                        st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
-
-            with st.popover("🔑 Alterar Usuário ou Senha de Acesso", use_container_width=True):
-                with st.form("form_change_credentials_welcome"):
-                    st.caption("Informe a senha atual para definir um novo usuário e/ou nova senha.")
-                    senha_atual_inp = st.text_input("Senha Atual:", type="password", placeholder="Digite a senha atual...")
-                    novo_user_inp = st.text_input("Novo Usuário:", value=usuario_cadastrado, placeholder="Ex: carlos")
-                    nova_senha_inp = st.text_input("Nova Senha:", type="password", placeholder="Digite a nova senha...")
-                    confirma_senha_inp = st.text_input("Confirmar Nova Senha:", type="password", placeholder="Confirme a nova senha...")
-                    btn_salvar_cred = st.form_submit_button("SALVAR NOVO USUÁRIO / SENHA", use_container_width=True)
-                    if btn_salvar_cred:
-                        if senha_atual_inp.strip() != pin_cadastrado:
-                            st.error("A senha atual informada está incorreta.")
-                        elif not novo_user_inp.strip():
-                            st.error("O nome de usuário não pode ficar em branco.")
-                        elif not nova_senha_inp.strip():
-                            st.error("A nova senha não pode ficar em branco.")
-                        elif nova_senha_inp.strip() != confirma_senha_inp.strip():
-                            st.error("A nova senha e a confirmação não coincidem.")
-                        else:
-                            config["usuario_estagiario"] = novo_user_inp.strip()
-                            config["pin_estagiario"] = nova_senha_inp.strip()
-                            if on_save_config:
-                                on_save_config(config)
-                            st.session_state["perfil_ativo"] = "estagiario"
-                            st.session_state["autenticado_estagiario"] = True
-                            st.query_params["acesso"] = "estagiario"
-                            st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
-                            agendar_cookie_login(st.query_params["token"])
-                            st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
-                            st.rerun()
 

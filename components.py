@@ -669,14 +669,14 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             max-height: 100vh !important;
         }
         [data-testid="stMainBlockContainer"], .block-container {
-            padding-top: 1.2rem !important;
+            padding-top: 2.2rem !important;
             padding-bottom: 0rem !important;
             max-height: 100vh !important;
             overflow: hidden !important;
         }
         [data-testid="stHeader"] {
-            height: 0px !important;
-            min-height: 0px !important;
+            background: transparent !important;
+            pointer-events: auto;
         }
         div[data-testid="stForm"] {
             padding: 12px 16px !important;

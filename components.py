@@ -62,33 +62,53 @@ def agendar_cookie_login(token: Optional[str]):
 
 
 def sync_auth_cookie():
-    """Grava/remove o cookie de login no navegador, se houver uma ação pendente."""
+    """
+    Sincroniza a sessão com o localStorage e os cookies do navegador.
+    - Quando logado (acao='set'): salva token em localStorage e cookie de 30 dias.
+    - Quando deslogado (acao='clear'): limpa localStorage e cookie.
+    - Quando na tela de login sem token na URL: se existir token salvo no navegador, redireciona automaticamente.
+    """
     acao = st.session_state.pop("_cookie_acao", None)
-    if not acao:
-        return
-    if acao == "set":
-        valor = st.session_state.pop("_cookie_valor", "")
-        validade = f"max-age={AUTH_COOKIE_DIAS * 24 * 3600}"
-    else:
-        valor = ""
-        validade = "max-age=0"
+    valor = st.session_state.pop("_cookie_valor", "") if acao == "set" else ""
 
     import streamlit.components.v1 as st_components
 
-    # O componente roda num iframe do mesmo domínio: o cookie é gravado no documento principal do app.
-    st_components.html(
-        f"""
-        <script>
-        (function () {{
-            var doc = document;
-            try {{ doc = window.parent.document; }} catch (e) {{}}
-            var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
-            doc.cookie = '{AUTH_COOKIE_NAME}={valor}; path=/; {validade}; SameSite=Lax' + seguro;
-        }})();
-        </script>
-        """,
-        height=0,
-    )
+    if acao == "set":
+        validade = f"max-age={AUTH_COOKIE_DIAS * 24 * 3600}"
+        st_components.html(
+            f"""
+            <script>
+            (function () {{
+                try {{
+                    var win = window.parent || window;
+                    var doc = win.document;
+                    var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
+                    doc.cookie = '{AUTH_COOKIE_NAME}={valor}; path=/; {validade}; SameSite=Lax' + seguro;
+                    win.localStorage.setItem('{AUTH_COOKIE_NAME}', '{valor}');
+                }} catch (e) {{}}
+            }})();
+            </script>
+            """,
+            height=0,
+        )
+    elif acao == "clear":
+        st.session_state["_acabou_de_sair"] = True
+        st_components.html(
+            f"""
+            <script>
+            (function () {{
+                try {{
+                    var win = window.parent || window;
+                    var doc = win.document;
+                    var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
+                    doc.cookie = '{AUTH_COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax' + seguro;
+                    win.localStorage.removeItem('{AUTH_COOKIE_NAME}');
+                }} catch (e) {{}}
+            }})();
+            </script>
+            """,
+            height=0,
+        )
 
 
 def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
@@ -630,27 +650,79 @@ def render_manager_screen(
 
 def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
     """
-    Exibe a tela inicial de seleção de perfil.
+    Exibe a tela inicial de seleção de perfil fixa (sem scroll).
     - Chefia: acesso direto com um clique, sem senha (read-only).
-    - Estagiário: acesso autenticado por Usuário e Senha, com opção de alterar credenciais.
+    - Estagiário: acesso autenticado por Usuário e Senha, com opção de lembrar login e alterar credenciais.
     """
-    knot_svg = get_knot_svg_html(size=44)
+    knot_svg = get_knot_svg_html(size=36)
     usuario_cadastrado = str(config.get("usuario_estagiario", "")).strip() or "carlos"
     pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
+    expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
+
+    # CSS exclusivo para travar a tela de login em 100vh (sem barra de rolagem) e compactar espaçamentos
+    render_html(
+        """
+        <style>
+        html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+            overflow: hidden !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+        }
+        [data-testid="stMainBlockContainer"], .block-container {
+            padding-top: 1.2rem !important;
+            padding-bottom: 0rem !important;
+            max-height: 100vh !important;
+            overflow: hidden !important;
+        }
+        [data-testid="stHeader"] {
+            height: 0px !important;
+            min-height: 0px !important;
+        }
+        div[data-testid="stForm"] {
+            padding: 12px 16px !important;
+        }
+        </style>
+        """
+    )
+
+    # Auto-login via localStorage caso o navegador tenha salvo o token anteriormente (e não acabou de sair)
+    if not st.session_state.pop("_acabou_de_sair", False):
+        import streamlit.components.v1 as st_components
+        st_components.html(
+            f"""
+            <script>
+            (function () {{
+                try {{
+                    var win = window.parent || window;
+                    var saved = win.localStorage.getItem('{AUTH_COOKIE_NAME}');
+                    if (saved && saved === '{expected_token}') {{
+                        var url = new URL(win.location.href);
+                        if (url.searchParams.get('token') !== saved) {{
+                            url.searchParams.set('acesso', 'estagiario');
+                            url.searchParams.set('token', saved);
+                            win.location.replace(url.toString());
+                        }}
+                    }}
+                }} catch (e) {{}}
+            }})();
+            </script>
+            """,
+            height=0,
+        )
 
     render_html(
         f"""
-        <div style="text-align: center; margin: 30px auto 25px auto; max-width: 680px;">
-            <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+        <div style="text-align: center; margin: 4px auto 14px auto; max-width: 680px;">
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
                 {knot_svg}
             </div>
-            <div style="font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; color: {ICMC_COLORS['text_primary']};">
+            <div style="font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; color: {ICMC_COLORS['text_primary']};">
                 ICMC • UNIVERSIDADE DE SÃO PAULO
             </div>
-            <div style="font-size: 0.85rem; color: {ICMC_COLORS['text_secondary']}; margin-top: 4px;">
+            <div style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; margin-top: 2px;">
                 Sistema Integrado de Ponto Eletrônico & Gestão de Estágio
             </div>
-            <div style="margin-top: 14px;">
+            <div style="margin-top: 8px;">
                 <span class="brand-badge">SELEÇÃO DE PERFIL DE ACESSO</span>
             </div>
         </div>
@@ -665,18 +737,18 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         with c_gestor:
             render_html(
                 f"""
-                <div class="metal-card" style="margin-bottom: 16px;">
-                    <div style="font-size: 0.72rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
+                    <div style="font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                         ACESSO EXECUTIVO
                     </div>
-                    <div style="font-size: 1.2rem; font-weight: 800; margin: 6px 0 10px 0; color: {ICMC_COLORS['text_primary']};">
+                    <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
                         Visão da Chefia / Supervisão
                     </div>
-                    <p style="font-size: 0.85rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.5; min-height: 60px;">
+                    <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
                         Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
                     </p>
-                    <div style="margin: 10px 0; padding: 6px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.75rem; color: {ICMC_COLORS['steel_blue']};">
-                        Modo Somente Leitura (Sem risco de alterações acidentais de registros)
+                    <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['steel_blue']};">
+                        Modo Somente Leitura (Sem risco de alterações acidentais)
                     </div>
                 </div>
                 """
@@ -691,30 +763,33 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         with c_estag:
             render_html(
                 f"""
-                <div class="metal-card" style="margin-bottom: 16px;">
-                    <div style="font-size: 0.72rem; color: {ICMC_COLORS['copper_amber']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
+                    <div style="font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                         CONTROLE OPERACIONAL
                     </div>
-                    <div style="font-size: 1.2rem; font-weight: 800; margin: 6px 0 10px 0; color: {ICMC_COLORS['text_primary']};">
+                    <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
                         Meu Ponto Pessoal
                     </div>
-                    <p style="font-size: 0.85rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.5; min-height: 60px;">
+                    <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
                         Área diária do estagiário para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes manuais.
                     </p>
-                    <div style="margin: 10px 0; padding: 6px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.75rem; color: {ICMC_COLORS['copper_amber']};">
-                        Acesso protegido com seu usuário e senha pessoais sincronizados na nuvem.
+                    <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['copper_amber']};">
+                        Acesso protegido com seu usuário e senha pessoais na nuvem.
                     </div>
                 </div>
                 """
             )
 
             with st.form("form_login_estag"):
-                usuario_input = st.text_input("Usuário:", placeholder="Digite seu usuário...")
-                pin_input = st.text_input("Senha:", type="password", placeholder="Digite sua senha...")
+                col_u, col_p = st.columns(2)
+                with col_u:
+                    usuario_input = st.text_input("Usuário:", placeholder="Seu usuário...")
+                with col_p:
+                    pin_input = st.text_input("Senha:", type="password", placeholder="Sua senha...")
                 lembrar_input = st.checkbox(
-                    "Lembrar login neste navegador",
+                    "Lembrar meu login neste navegador",
                     value=True,
-                    help=f"Mantém você conectado por {AUTH_COOKIE_DIAS} dias neste navegador. Use 'Sair' para esquecer.",
+                    help=f"Mantém você conectado por {AUTH_COOKIE_DIAS} dias neste navegador. Clique em 'Sair' na barra lateral quando quiser desconectar.",
                 )
                 btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
                 if btn_estag:
@@ -732,7 +807,7 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                     else:
                         st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
 
-            with st.expander("Alterar Usuário ou Senha de Acesso", expanded=False):
+            with st.popover("🔑 Alterar Usuário ou Senha de Acesso", use_container_width=True):
                 with st.form("form_change_credentials_welcome"):
                     st.caption("Informe a senha atual para definir um novo usuário e/ou nova senha.")
                     senha_atual_inp = st.text_input("Senha Atual:", type="password", placeholder="Digite a senha atual...")

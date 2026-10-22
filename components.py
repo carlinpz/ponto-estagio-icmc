@@ -659,7 +659,7 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
     pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
     expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
 
-    # CSS exclusivo para travar a tela de login em 100vh no desktop e permitir rolagem suave e centralizada no celular
+    # CSS moderno com abas, centralizado e com scroll livre e responsivo em qualquer tela
     render_html(
         f"""
         <style>
@@ -668,17 +668,36 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             pointer-events: auto;
         }}
 
-        /* Container principal centralizado horizontalmente */
+        /* Container de rolagem e viewport global: destrava e permite scroll nativo fluido */
+        html, body, .stApp, [data-testid="stAppViewContainer"] {{
+            height: 100% !important;
+            min-height: 100% !important;
+        }}
+
+        [data-testid="stMain"] {{
+            height: 100% !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
+        }}
+
+        /* Container principal centralizado (largura padrão compacta de login ~500px) */
         [data-testid="stMainBlockContainer"], .block-container {{
-            max-width: 880px !important;
+            max-width: 500px !important;
             margin-left: auto !important;
             margin-right: auto !important;
-            width: 100% !important;
+            padding-top: 1.5rem !important;
+            padding-bottom: 3.5rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
             box-sizing: border-box !important;
         }}
 
         .welcome-title {{
-            font-size: 1.35rem;
+            font-size: 1.25rem;
             font-weight: 800;
             letter-spacing: -0.02em;
             color: {ICMC_COLORS['text_primary']};
@@ -686,70 +705,64 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         }}
 
         .welcome-sub {{
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             color: {ICMC_COLORS['text_secondary']};
             margin-top: 2px;
         }}
 
-        /* DESKTOP (telas >= 769px com altura >= 640px): tela fixa e centralizada em 100vh sem barra de rolagem */
-        @media (min-width: 769px) and (min-height: 640px) {{
-            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
-                overflow: hidden !important;
-                height: 100vh !important;
-                max-height: 100vh !important;
-            }}
-            [data-testid="stMainBlockContainer"], .block-container {{
-                padding-top: 2.2rem !important;
-                padding-bottom: 0.5rem !important;
-                max-height: 100vh !important;
-                overflow: hidden !important;
-            }}
-            div[data-testid="stForm"] {{
-                padding: 12px 16px !important;
-            }}
+        /* Abas modernas e centralizadas */
+        .stTabs [data-baseweb="tab-list"] {{
+            display: flex !important;
+            justify-content: center !important;
+            margin-bottom: 12px !important;
+            gap: 8px !important;
+        }}
+        .stTabs [data-baseweb="tab"] {{
+            flex: 1 1 0% !important;
+            text-align: center !important;
+            justify-content: center !important;
+            font-size: 0.82rem !important;
         }}
 
-        /* CELULAR E TELAS MENORES OU BAIXAS: permite rolagem vertical suave, espaçamento seguro e layout centralizado */
-        @media (max-width: 768px), (max-height: 639px) {{
-            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
-                overflow-y: auto !important;
-                overflow-x: hidden !important;
-                height: auto !important;
-                min-height: 100% !important;
-                max-height: none !important;
-                -webkit-overflow-scrolling: touch !important;
+        /* Cartões de perfil */
+        .welcome-card {{
+            background: rgba(15, 23, 42, 0.78) !important;
+            backdrop-filter: blur(8px) !important;
+            -webkit-backdrop-filter: blur(8px) !important;
+            border: 1px solid rgba(148, 163, 184, 0.18) !important;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+            border-radius: 12px !important;
+            padding: 14px 16px !important;
+            margin-bottom: 12px !important;
+        }}
+
+        /* Botão do popover escuro e nítido (não branco) */
+        div[data-testid="stPopover"] > button,
+        button[data-testid="stPopoverButton"] {{
+            background: rgba(30, 41, 59, 0.85) !important;
+            border: 1px solid rgba(148, 163, 184, 0.25) !important;
+            color: #F8FAFC !important;
+            font-size: 0.8rem !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+            transition: all 0.2s ease !important;
+        }}
+        div[data-testid="stPopover"] > button:hover,
+        button[data-testid="stPopoverButton"]:hover {{
+            border-color: #38BDF8 !important;
+            color: #38BDF8 !important;
+        }}
+
+        @media (max-width: 480px) {{
+            .welcome-title {{
+                font-size: 1.1rem !important;
             }}
-            [data-testid="stMainBlockContainer"], .block-container {{
-                padding-top: 1.2rem !important;
-                padding-bottom: 3.5rem !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-                max-width: 480px !important;
-                height: auto !important;
-                max-height: none !important;
-                overflow-y: visible !important;
-                overflow-x: hidden !important;
-            }}
-            [data-testid="stHorizontalBlock"] {{
-                flex-wrap: wrap !important;
-                gap: 0.75rem !important;
-            }}
-            [data-testid="stColumn"] {{
-                width: 100% !important;
-                min-width: 100% !important;
-            }}
-            .metal-card {{
-                padding: 12px 14px !important;
-                margin-bottom: 8px !important;
+            .welcome-sub {{
+                font-size: 0.72rem !important;
             }}
             div[data-testid="stForm"] {{
                 padding: 10px 12px !important;
-            }}
-            .welcome-title {{
-                font-size: 1.15rem !important;
-            }}
-            .welcome-sub {{
-                font-size: 0.75rem !important;
             }}
         }}
         </style>
@@ -800,49 +813,23 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         """
     )
 
-    c_gestor, c_estag = st.columns(2)
+    tab_estag, tab_gestor = st.tabs(["🔑 Meu Ponto (Estagiário)", "👔 Visão da Chefia"])
 
-    with c_gestor:
+    with tab_estag:
         render_html(
             f"""
-            <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
-                <div style="font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
-                    ACESSO EXECUTIVO
-                </div>
-                <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
-                    Visão da Chefia / Supervisão
-                </div>
-                <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
-                    Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
-                </p>
-                <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['steel_blue']};">
-                    Modo Somente Leitura (Sem risco de alterações acidentais)
-                </div>
-            </div>
-            """
-        )
-        if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
-            st.session_state["perfil_ativo"] = "gestao"
-            st.query_params["acesso"] = "gestao"
-            if "token" in st.query_params:
-                del st.query_params["token"]
-            st.rerun()
-
-    with c_estag:
-        render_html(
-            f"""
-            <div class="metal-card" style="margin-bottom: 12px; padding: 14px 18px !important;">
+            <div class="welcome-card">
                 <div style="font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     CONTROLE OPERACIONAL
                 </div>
-                <div style="font-size: 1.1rem; font-weight: 800; margin: 4px 0 6px 0; color: {ICMC_COLORS['text_primary']};">
-                    Meu Ponto Pessoal
+                <div style="font-size: 1.05rem; font-weight: 800; margin: 3px 0 5px 0; color: {ICMC_COLORS['text_primary']};">
+                    Acesso do Estagiário
                 </div>
-                <p style="font-size: 0.8rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.45; margin-bottom: 8px;">
-                    Área diária do estagiário para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes manuais.
+                <p style="font-size: 0.78rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.4; margin-bottom: 6px;">
+                    Área diária para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes.
                 </p>
-                <div style="margin: 6px 0 2px 0; padding: 5px 10px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.72rem; color: {ICMC_COLORS['copper_amber']};">
-                    Acesso protegido com seu usuário e senha pessoais na nuvem.
+                <div style="margin: 4px 0 0 0; padding: 4px 8px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']};">
+                    Acesso com usuário e senha sincronizados na nuvem.
                 </div>
             </div>
             """
@@ -904,4 +891,30 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                         agendar_cookie_login(st.query_params["token"])
                         st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
                         st.rerun()
+
+    with tab_gestor:
+        render_html(
+            f"""
+            <div class="welcome-card">
+                <div style="font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                    ACESSO EXECUTIVO
+                </div>
+                <div style="font-size: 1.05rem; font-weight: 800; margin: 3px 0 5px 0; color: {ICMC_COLORS['text_primary']};">
+                    Visão da Chefia / Supervisão
+                </div>
+                <p style="font-size: 0.78rem; color: {ICMC_COLORS['text_secondary']}; line-height: 1.4; margin-bottom: 6px;">
+                    Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
+                </p>
+                <div style="margin: 4px 0 0 0; padding: 4px 8px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']};">
+                    Modo Somente Leitura (Sem risco de alterações acidentais)
+                </div>
+            </div>
+            """
+        )
+        if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
+            st.session_state["perfil_ativo"] = "gestao"
+            st.query_params["acesso"] = "gestao"
+            if "token" in st.query_params:
+                del st.query_params["token"]
+            st.rerun()
 

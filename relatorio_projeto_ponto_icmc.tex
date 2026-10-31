@@ -1,0 +1,436 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================================
+% PACOTES E CONFIGURAÇÕES GERAIS
+% ============================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath, amssymb}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage{hyperref}
+
+% Desativa atalhos de aspas do babel para evitar conflitos em blocos técnicos
+\AtBeginDocument{\shorthandoff{"}}
+
+% ============================================================================
+% PALETA DE CORES INSTITUCIONAL (INSPIRADA NO ICMC / USP)
+% ============================================================================
+\definecolor{icmcDark}{HTML}{0F172A}
+\definecolor{icmcBlue}{HTML}{0284C7}
+\definecolor{icmcCyan}{HTML}{38BDF8}
+\definecolor{icmcAmber}{HTML}{D97706}
+\definecolor{icmcSlate}{HTML}{334155}
+\definecolor{icmcLightBg}{HTML}{F8FAFC}
+\definecolor{icmcBorder}{HTML}{CBD5E1}
+\definecolor{codeBg}{HTML}{F1F5F9}
+
+% Configuração de links
+\hypersetup{
+    colorlinks=true,
+    linkcolor=icmcBlue,
+    urlcolor=icmcBlue,
+    citecolor=icmcBlue,
+    pdftitle={Relatorio Tecnico - Sistema de Ponto Eletronico ICMC USP},
+    pdfauthor={Carlos Henrique da Luz Pizzi},
+    pdfsubject={Arquitetura e Engenharia de Software - Ponto de Estagio}
+}
+
+% Estilo de títulos de seção
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{icmcDark}}
+  {\thesection.}{0.6em}{}[\titlerule]
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{icmcBlue}}
+  {\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{icmcSlate}}
+  {\thesubsubsection}{0.6em}{}
+
+% Cabeçalho e Rodapé
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textbf{ICMC $\bullet$ USP} | Relatório Técnico de Software}
+\fancyhead[R]{\small Projeto 605001 --- Ponto Eletrônico \& FUSP}
+\fancyfoot[L]{\small Carlos Henrique da Luz Pizzi}
+\fancyfoot[C]{\small Outubro de 2026}
+\fancyfoot[R]{\small Página \thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% Estilo de blocos de código
+\lstset{
+    basicstyle=\ttfamily\footnotesize\color{icmcDark},
+    backgroundcolor=\color{codeBg},
+    frame=single,
+    rulecolor=\color{icmcBorder},
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    tabsize=4,
+    xleftmargin=4pt,
+    xrightmargin=4pt,
+    aboveskip=8pt,
+    belowskip=8pt
+}
+
+% Caixas de destaque
+\newtcolorbox{infoBox}[1]{
+    colback=icmcLightBg,
+    colframe=icmcBlue,
+    fonttitle=\bfseries,
+    title=#1,
+    boxrule=0.8pt,
+    arc=3pt,
+    left=8pt,
+    right=8pt,
+    top=6pt,
+    bottom=6pt
+}
+
+\newtcolorbox{warnBox}[1]{
+    colback=icmcLightBg,
+    colframe=icmcAmber,
+    fonttitle=\bfseries,
+    title=#1,
+    boxrule=0.8pt,
+    arc=3pt,
+    left=8pt,
+    right=8pt,
+    top=6pt,
+    bottom=6pt
+}
+
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+% ============================================================================
+% CAPA / PÁGINA DE ROSTO
+% ============================================================================
+\begin{titlepage}
+    \centering
+    \vspace*{1.0cm}
+    
+    {\Large \textbf{UNIVERSIDADE DE SÃO PAULO (USP)}}\\[0.25cm]
+    {\large \textbf{Instituto de Ciências Matemáticas e de Computação (ICMC)}}\\[0.25cm]
+    {\normalsize Fundação de Apoio à Universidade de São Paulo (FUSP) --- Projeto 605001}
+    
+    \vspace{1.8cm}
+    \rule{\linewidth}{1.5pt}\\[0.5cm]
+    {\fontsize{20}{26}\selectfont \bfseries \color{icmcDark} RELATÓRIO TÉCNICO DE\\ARQUITETURA E DESENVOLVIMENTO\\DE SOFTWARE\par}
+    \vspace{0.35cm}
+    {\fontsize{13.5}{18}\selectfont \color{icmcBlue} Sistema Web de Ponto Eletrônico, Banco de Horas e Emissão\\Automatizada do Boletim de Frequência FUSP\par}
+    \vspace{0.3cm}
+    \rule{\linewidth}{1.5pt}
+    
+    \vspace{1.6cm}
+    
+    \begin{tcolorbox}[colback=icmcLightBg, colframe=icmcBorder, width=0.94\textwidth, arc=4pt, boxrule=0.8pt]
+        \renewcommand{\arraystretch}{1.4}
+        \begin{tabularx}{\textwidth}{>{\bfseries\color{icmcSlate}}l X}
+            Estagiário / Autor: & Carlos Henrique da Luz Pizzi \\
+            Supervisão: & Maria Fernanda Marreta \\
+            Unidade / Setor: & ICMC / USP --- Projeto FUSP nº 605001 \\
+            Aplicação em Nuvem: & \url{https://ponto-estagio-carlos.streamlit.app} \\
+            Link da Supervisão: & \url{https://ponto-estagio-carlos.streamlit.app/?acesso=gestao} \\
+            Repositório Git: & \url{https://github.com/carlinpz/ponto-estagio-icmc} \\
+            Diretório Local (PC): & \footnotesize\texttt{C:\textbackslash Users\textbackslash 16913193\textbackslash .gemini\textbackslash antigravity\textbackslash scratch\textbackslash ponto\_estagio} \\
+            Legislação Base: & Lei Federal nº 11.788/2008 (Lei do Estágio)
+        \end{tabularx}
+    \end{tcolorbox}
+    
+    \vfill
+    
+    {\large São Carlos --- SP}\\[0.1cm]
+    {\normalsize 16 de Outubro de 2026}
+\end{titlepage}
+
+% ============================================================================
+% SUMÁRIO
+% ============================================================================
+\tableofcontents
+\newpage
+
+% ============================================================================
+% 1. VISÃO GERAL E OBJETIVOS DO PROJETO
+% ============================================================================
+\section{Visão Geral e Objetivos do Projeto}
+
+O \textbf{Sistema Integrado de Ponto Eletrônico e Gestão de Estágio (ICMC $\bullet$ USP)} foi projetado e desenvolvido para substituir controles manuais em planilhas isoladas por uma aplicação web moderna, auditável e sincronizada em tempo real na nuvem.
+
+O sistema atende simultaneamente às necessidades operacionais do estagiário (\textbf{Carlos Henrique da Luz Pizzi}) e às demandas de acompanhamento e validação da supervisão (\textbf{Maria Fernanda Marreta}), garantindo conformidade estrita com a \textbf{Lei Federal nº 11.788/2008 (Lei do Estágio)} e com o fluxo documental da \textbf{Fundação de Apoio à Universidade de São Paulo (FUSP)} no âmbito do projeto \textbf{605001}.
+
+\subsection{Principais Entregas e Benefícios}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Registro de Ponto em Tempo Real:} Marcação de entrada, início de intervalo, retorno de intervalo e saída com relógio digital ao vivo sincronizado no fuso horário oficial de Brasília ($\text{UTC}-3$).
+    \item \textbf{Cálculo Automatizado de Banco de Horas:} Apuração instantânea de horas líquidas trabalhadas, desconto de intervalos intrajornada, comparação com a meta contratual diária ($6,0\text{h/dia}$ ou $30\text{h/semana}$) e saldo acumulado ao longo dos meses.
+    \item \textbf{Geração Automática do Boletim Oficial FUSP:} Emissão em 1 clique do documento oficial da FUSP no ciclo regulamentar do \textbf{dia 21 do mês anterior ao dia 20 do mês vigente}, pronto para impressão ou exportação em PDF para entrega até o dia 22.
+    \item \textbf{Controle de Acesso por Perfil:} Separação entre o perfil operacional do estagiário (protegido por login com \textbf{Usuário e Senha} e token criptográfico de sessão) e o perfil executivo da supervisão (acesso direto em modo \textbf{Somente Leitura}).
+    \item \textbf{Persistência Híbrida e Redundante:} Sincronização automática entre arquivo local (\texttt{ponto\_eletronico.json}) e banco de dados em nuvem no \textbf{Google Sheets} via \textbf{Google Apps Script}.
+\end{itemize}
+
+% ============================================================================
+% 2. ARQUITETURA, ARMAZENAMENTO E HOSPEDAGEM EM NUVEM
+% ============================================================================
+\section{Arquitetura, Armazenamento e Hospedagem em Nuvem}
+
+Para garantir disponibilidade contínua (24/7) a partir de qualquer dispositivo (computador pessoal, estação de trabalho na USP ou smartphone) sem custos de infraestrutura, o sistema utiliza uma arquitetura distribuída em três camadas integradas.
+
+\subsection{Onde o Sistema Está Salvo?}
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{No Computador Local (Ambiente de Desenvolvimento e Backup):}
+    \begin{lstlisting}
+C:\Users\16913193\.gemini\antigravity\scratch\ponto_estagio\
+    \end{lstlisting}
+    Nesta pasta residem os módulos em Python (\texttt{app.py}, \texttt{storage.py}, \texttt{calculations.py}, \texttt{components.py}, \texttt{theme.py}), a suíte de testes (\texttt{test\_app.py}) e o banco de dados local espelhado (\texttt{ponto\_eletronico.json}).
+
+    \item \textbf{No GitHub (Servidor de Código e Versionamento):}
+    \begin{lstlisting}
+https://github.com/carlinpz/ponto-estagio-icmc
+    \end{lstlisting}
+    Guarda todo o histórico de versões do código-fonte nas ramificações (\textit{branches}) \texttt{main} e \texttt{master}. Qualquer atualização enviada via \texttt{git push} dispara automaticamente a atualização do site em produção.
+
+    \item \textbf{No Streamlit Community Cloud (Servidor de Hospedagem Web):}
+    \begin{lstlisting}
+https://ponto-estagio-carlos.streamlit.app
+    \end{lstlisting}
+    É o servidor em nuvem que executa o código Python e entrega a interface visual no navegador para o estagiário e para a supervisão.
+
+    \item \textbf{No Google Drive / Google Sheets (Banco de Dados Permanente em Nuvem):}
+    \begin{lstlisting}
+https://docs.google.com/spreadsheets/d/1-1XDAVUDdAGK-OUfCog8bDizN8Ax-oeHfl81rHlxfmI
+    \end{lstlisting}
+    Como servidores em nuvem utilizam contêineres efêmeros (que reiniciam periodicamente), a planilha do Google Drive atua como a \textbf{fonte única da verdade (\textit{Single Source of Truth})}, armazenando tanto os registros diários de ponto quanto as configurações e credenciais de acesso.
+\end{enumerate}
+
+\subsection{Fluxo de Comunicação e Sincronização de Dados}
+O ciclo de leitura e gravação foi otimizado para oferecer velocidade de carregamento inferior a meio segundo:
+
+\begin{infoBox}{Fluxo Operacional de Dados (Leitura Rápida + Escrita Transacional)}
+\begin{enumerate}[leftmargin=1.5em, itemsep=2pt]
+    \item \textbf{Leitura Instantânea (CSV Export):} Ao abrir o aplicativo, o módulo \texttt{storage.py} requisita o endpoint de exportação CSV da planilha Google com um parâmetro \textit{cache-buster} (\texttt{\&t=timestamp}). Os registros e a linha especial \texttt{CONFIG\_JSON} são carregados em memória na sessão (\texttt{st.session\_state.db}).
+    \item \textbf{Processamento em Memória:} Durante a navegação entre abas e filtros, o sistema utiliza o cache em sessão para evitar requisições repetitivas na rede, garantindo resposta imediata a cada clique.
+    \item \textbf{Gravação Segura (Webhook Apps Script):} Sempre que um ponto é batido, um ajuste manual é salvo ou a senha é alterada, a função \texttt{save\_database()} grava o JSON local e dispara uma requisição HTTP \texttt{POST} para o Web App do \textbf{Google Apps Script}, que atualiza imediatamente a planilha na nuvem.
+\end{enumerate}
+\end{infoBox}
+
+\subsection{Estabilidade, Prazos, Custos e ``Modo Soneca''}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Custo e Prazo de Validade:} Todos os serviços utilizados (GitHub, Streamlit Community Cloud, Google Drive e Google Apps Script) operam em planos gratuitos permanentes (\textit{Free Tier}), \textbf{sem prazo de expiração} e sem cobrança de mensalidade.
+    \item \textbf{Segurança contra Perda de Dados:} Mesmo que o servidor do Streamlit passe por manutenção ou reinicialização, \textbf{nenhum dado é perdido}, pois todas as marcações e credenciais estão gravadas diretamente na sua planilha do Google Drive.
+    \item \textbf{Comportamento de Hibernação (Modo Soneca):} O Streamlit Community Cloud possui uma política de economia de recursos na qual aplicativos que ficam \textbf{de 5 a 7 dias consecutivos sem nenhum acesso} entram em modo de espera (\textit{sleep mode}).
+    \begin{itemize}
+        \item Como o ponto é utilizado diariamente de segunda a sexta-feira, o aplicativo permanecerá sempre ativo.
+        \item Caso ocorra um período longo de férias/recesso e o app entre em hibernação, ao abrir o link será exibido um botão azul \textbf{``Yes, get this app back up!''}. Basta um clique para o servidor religar em cerca de 20 segundos, restaurando automaticamente todos os dados da planilha.
+    \end{itemize}
+\end{itemize}
+
+% ============================================================================
+% 3. TECNOLOGIAS E LINGUAGENS UTILIZADAS
+% ============================================================================
+\section{Tecnologias e Linguagens Utilizadas}
+
+Embora o projeto seja centrado em Python, ele combina cinco tecnologias complementares para entregar uma experiência visual e funcional de alto nível:
+
+\begin{table}[ht!]
+\centering
+\renewcommand{\arraystretch}{1.35}
+\begin{tabularx}{\textwidth}{>{\bfseries\color{icmcDark}}l l X}
+\toprule
+\textbf{Linguagem / Tecnologia} & \textbf{Proporção} & \textbf{Papel no Sistema} \\
+\midrule
+Python 3.11+ & $\sim 80\%$ & Lógica central de negócios, cálculos de jornada, manipulação de datas/fusos, integração HTTP com nuvem e estrutura de dados. \\
+Streamlit & Framework UI & Renderização reativa da interface web, gerenciamento de sessão, formulários, autenticação e hospedagem em nuvem. \\
+Pandas \& Plotly & Dados / Gráficos & Estruturação tabular de séries temporais, cálculo vetorial de saldos acumulados e gráficos interativos de desempenho. \\
+HTML5 \& CSS3 & $\sim 12\%$ & Estilização metálica inspirada no ICMC/USP (\textit{glassmorphism}), cartões de indicadores e diagramação fiel do Boletim FUSP A4. \\
+JavaScript (ES6+) & $\sim 8\%$ & Animação física em \texttt{<canvas>} 60fps (rede neural interativa no fundo), relógio digital em tempo real no DOM e webhook do Google Apps Script. \\
+JSON \& CSV & Dados & Protocolos de serialização para persistência local (\texttt{.json}), leitura rápida da nuvem e exportação compatível com Excel (\texttt{.csv} UTF-8 BOM). \\
+\bottomrule
+\end{tabularx}
+\caption{Stack tecnológico empregado no projeto.}
+\end{table}
+
+% ============================================================================
+% 4. ENGENHARIA DE SOFTWARE E ESTRUTURA MODULAR DO CÓDIGO
+% ============================================================================
+\section{Engenharia de Software e Estrutura Modular do Código}
+
+O código-fonte foi arquitetado seguindo o princípio de \textbf{Separação de Responsabilidades (\textit{Separation of Concerns})}, dividindo o sistema em 6 arquivos independentes e coesos.
+
+\subsection{\texttt{app.py} --- Orquestrador Principal e Controle de Sessão}
+É o ponto de entrada (\textit{entry point}) executado pelo comando \texttt{streamlit run app.py}. Suas responsabilidades incluem:
+\begin{itemize}[leftmargin=1.5em]
+    \item Inicializar e manter em cache o banco de dados na sessão (\texttt{init\_session\_state}), evitando chamadas de rede desnecessárias a cada clique.
+    \item Validar o perfil de acesso ativo (\texttt{estagiario} vs. \texttt{gestao}) e verificar o token criptográfico na URL (\texttt{?acesso=estagiario\&token=...}) para manter a sessão autenticada ao atualizar a página (F5).
+    \item Renderizar a barra lateral com seletor de período (mês/ano), botão de sincronização manual com a nuvem (\textbf{Sincronizar Nuvem}), painel de parâmetros contratuais e botões de ponto rápido.
+    \item Organizar as 6 abas operacionais da visão do estagiário:
+    \begin{enumerate}
+        \item \textit{Registro Rápido}
+        \item \textit{Gráficos \& Análise}
+        \item \textit{Histórico Mensal}
+        \item \textit{Ajuste Manual} (com suporte a expedientes em andamento e feriados/abonos)
+        \item \textit{Boletim FUSP}
+        \item \textit{Exportação \& Backup}
+    \end{enumerate}
+\end{itemize}
+
+\subsection{\texttt{storage.py} --- Camada de Persistência Híbrida e Segurança de Dados}
+Gerencia toda a entrada e saída de dados entre o disco local e o Google Drive:
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{load\_database\_from\_sheet\_csv()}: Faz o download instantâneo da planilha Google em formato CSV, converte horários e datas com expressões regulares (\texttt{\_clean\_cloud\_time} e \texttt{\_clean\_cloud\_date}) e extrai o objeto JSON de configurações salvo na linha \texttt{CONFIG\_JSON}.
+    \item \texttt{save\_database\_to\_apps\_script()}: Empacota todos os registros diários junto com a linha especial \texttt{CONFIG\_JSON} (que guarda nome, supervisora, projeto, usuário e senha) e envia via \texttt{POST} para o webhook do Google Apps Script.
+    \item \texttt{\_deduplicate\_records()}: Garante unicidade absoluta por data (\texttt{YYYY-MM-DD}), impedindo que cliques simultâneos ou retransmissões de rede gerem linhas duplicadas nas tabelas ou relatórios.
+    \item \texttt{\_merge\_configs()}: Impede que leituras parciais ou valores vazios sobrescrevam o usuário e a senha cadastrados pelo estagiário.
+    \item \texttt{\_parse\_meta\_dia()}: Preserva metas iguais a \texttt{0.0} em dias de feriado, recesso ou abono.
+\end{itemize}
+
+\subsection{\texttt{calculations.py} --- Motor Matemático, Fuso Horário e Boletim FUSP}
+Concentra todas as regras de cálculo trabalhista/acadêmico e geração documental:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Fuso Horário Oficial de Brasília (\texttt{BRT\_TZ}):} Define \texttt{timezone(timedelta(hours=-3))} nas funções \texttt{now\_br()} e \texttt{today\_br()}. Como os servidores do Streamlit Cloud operam em horário \texttt{UTC} ($+3\text{h}$), essa camada garante que todas as batidas e cálculos de tempo decorrido reflitam exatamente o horário de São Carlos/Brasília.
+    \item \textbf{Cálculo de Jornada (\texttt{calculate\_day\_worked\_hours}):} Converte marcações \texttt{HH:MM:SS} em objetos \texttt{datetime}, subtrai o intervalo intrajornada e retorna as horas líquidas em formato decimal e o status do dia (\textit{Concluído}, \textit{Em andamento}, \textit{Feriado / Abono} ou \textit{Ausente}).
+    \item \textbf{Auditoria da Lei do Estágio (\texttt{detect\_compliance\_issues}):} Inspeciona os registros em busca de marcações incompletas em dias anteriores (entrada sem saída ou pausa sem retorno) e jornadas acima do limite legal de $6\text{h}$ diárias da Lei 11.788/2008.
+    \item \textbf{Gerador Oficial do Boletim FUSP (\texttt{generate\_fusp\_timesheet\_html}):} Calcula o ciclo exato da FUSP (\texttt{get\_fusp\_period\_dates}, do dia 21 do mês anterior ao dia 20 do mês selecionado) e constrói o HTML/CSS fiel ao modelo da Fundação, incluindo logotipo embutido em Base64, tabela de 30/31 dias, destaque para sábados/domingos e campos de assinatura do estagiário e da coordenação.
+\end{itemize}
+
+\subsection{\texttt{components.py} --- Componentes Visuais, Login e Visão da Supervisão}
+Encapsula os blocos de interface gráfica:
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{render\_welcome\_screen()}: Tela inicial de escolha de perfil com acesso direto para a Supervisão e formulário de login com \textbf{Usuário e Senha} para o estagiário, além de um painel expansível para alteração de credenciais sincronizado na nuvem.
+    \item \texttt{compute\_auth\_token()}: Gera um hash criptográfico truncado (\texttt{SHA-256}) a partir do par \texttt{usuário:senha} para manter a sessão autenticada no navegador sem expor a senha na URL.
+    \item \texttt{render\_metric\_cards()} e \texttt{render\_charts()}: Renderizam os 4 cartões superiores de KPI e os 3 gráficos interativos em Plotly (Saldo Diário em barras, Evolução do Saldo Acumulado em linha e Horas Realizadas vs. Meta).
+    \item \texttt{render\_manager\_screen()}: Painel executivo exclusivo da supervisão (\textbf{Maria Fernanda Marreta}), contendo status em tempo real do estagiário hoje, indicadores de assiduidade, auditoria de conformidade legal, espelho mensal e download/prévia direta do \textbf{Boletim de Frequência FUSP}.
+\end{itemize}
+
+\subsection{\texttt{theme.py} --- Identidade Visual Metálica e Scripts Client-Side}
+Define a estética institucional inspirada no ICMC/USP:
+\begin{itemize}[leftmargin=1.5em]
+    \item Paleta escura metálica (\textit{obsidian}, \textit{steel blue} \texttt{\#38BDF8} e \textit{copper amber} \texttt{\#F59E0B}) com tipografia técnica (\textit{Plus Jakarta Sans} e \textit{JetBrains Mono}).
+    \item Emblema vetorial SVG do nó matemático estilizado (\texttt{get\_knot\_svg\_html}).
+    \item Script JavaScript que injeta um elemento \texttt{<canvas id=\textquotesingle neural-bg-global\textquotesingle >} diretamente no \texttt{document.body}, desenhando uma rede de partículas interativas a 60 quadros por segundo, acompanhado do script de atualização contínua do relógio digital a cada $250\text{ms}$.
+\end{itemize}
+
+\subsection{\texttt{test\_app.py} --- Suíte de Testes Automatizados}
+Script de verificação contínua que executa 12 baterias de testes unitários e de integração, validando cálculos com intervalo, horas extras, horas negativas, conversão de horários, processamento de DataFrame, exportação CSV, contagem de dias úteis, detecção de inconformidades legais, geração do Boletim FUSP, tratamento de feriados (\texttt{meta\_dia = 0.0}) e proteção de credenciais.
+
+% ============================================================================
+% 5. MODELAGEM MATEMÁTICA E REGRAS DE NEGÓCIO
+% ============================================================================
+\section{Modelagem Matemática e Regras de Negócio}
+
+\subsection{Cálculo de Horas Líquidas Diárias}
+Seja um dia de trabalho $d$ com horários registrados de entrada $T_{\text{ent}}$, início de pausa $T_{\text{ini\_p}}$, fim de pausa $T_{\text{fim\_p}}$ e saída $T_{\text{sai}}$. O tempo bruto de permanência $\Delta T_{\text{bruto}}$ e a duração do intervalo intrajornada $\Delta T_{\text{pausa}}$ são dados por:
+\[
+\Delta T_{\text{bruto}} = T_{\text{sai}} - T_{\text{ent}}, \qquad
+\Delta T_{\text{pausa}} = 
+\begin{cases} 
+\max(0, \; T_{\text{fim\_p}} - T_{\text{ini\_p}}), & \text{se houver pausa registrada}, \\
+0, & \text{caso contrário}.
+\end{cases}
+\]
+As horas líquidas trabalhadas em formato decimal $H_{\text{líq}}(d)$ (em horas) são obtidas por:
+\[
+H_{\text{líq}}(d) = \operatorname{round}\!\left(\frac{\max(0, \; \Delta T_{\text{bruto}} - \Delta T_{\text{pausa}})}{3600\text{ s}}, \; 2\right).
+\]
+
+\subsection{Saldo Diário e Banco de Horas Acumulado}
+Para cada dia $d$ com meta contratual $M(d)$ (padrão $M(d) = 6,0\text{h}$ em dias úteis e $M(d) = 0,0\text{h}$ em feriados/abonos):
+\[
+S(d) = 
+\begin{cases}
+H_{\text{líq}}(d) - M(d), & \text{se o expediente estiver concluído}, \\
+0,0, & \text{se estiver em andamento ou for Feriado / Abono } (M(d) = 0), \\
+-M(d), & \text{se for dia útil ausente sem justificativa}.
+\end{cases}
+\]
+O saldo acumulado até o $k$-ésimo dia concluído da série histórica é:
+\[
+S_{\text{acum}}(k) = \sum_{i=1}^{k} S(d_i).
+\]
+
+\subsection{Regra de Período do Boletim FUSP}
+Para um mês de referência $m \in \{1, \dots, 12\}$ e ano $A$, o período oficial de apuração da FUSP compreende todas as datas $d$ no intervalo fechado $[D_{\text{início}}, D_{\text{fim}}]$:
+\[
+D_{\text{início}} = 
+\begin{cases}
+21/12/(A-1), & \text{se } m = 1, \\
+21/(m-1)/A, & \text{se } m \in \{2, \dots, 12\},
+\end{cases}
+\qquad
+D_{\text{fim}} = 20/m/A.
+\]
+
+% ============================================================================
+% 6. AUDITORIA DE QUALIDADE E CORREÇÕES IMPLEMENTADAS
+% ============================================================================
+\section{Auditoria de Qualidade e Correções Implementadas}
+
+Durante o checkup técnico completo realizado em Outubro de 2026, foram diagnosticadas e solucionadas as seguintes falhas estruturais:
+
+\begin{longtable}{>{\bfseries\color{icmcDark}}p{3.8cm} p{5.2cm} p{6.0cm}}
+\toprule
+\textbf{Falha Identificada} & \textbf{Causa Raiz} & \textbf{Solução de Engenharia Aplicada} \\
+\midrule
+\endhead
+Reset constante de senha a cada acesso & A leitura CSV retornava \texttt{DEFAULT\_CONFIG} com senha vazia e sobrescrevia o JSON local; o Apps Script não salvava o objeto \texttt{config}. & Criação da linha de metadados \texttt{CONFIG\_JSON} na planilha Google e da função \texttt{\_merge\_configs()}, garantindo persistência definitiva de usuário e senha na nuvem. \\
+\midrule
+Ausência de login por Usuário + Senha & O sistema solicitava apenas um PIN simples e permitia acesso via parâmetro de URL sem verificação de token. & Implementação de login completo com \textbf{Usuário e Senha}, gerenciamento de credenciais e validação por token hash \texttt{SHA-256} (\texttt{compute\_auth\_token}). \\
+\midrule
+Diferença de +3h no Streamlit Cloud & Os servidores do Streamlit Cloud operam em fuso \texttt{UTC}, adiantando batidas e cálculos em 3 horas em relação ao Brasil. & Criação das funções \texttt{now\_br()} e \texttt{today\_br()} com fuso fixo \texttt{BRT\_TZ} ($\text{UTC}-3$) em todos os módulos. \\
+\midrule
+Feriado ($0\text{h}$) tratado como falta ($-6\text{h}$) & Expressão booleana avaliava \texttt{meta\_dia = 0.0} como \texttt{False}, revertendo a meta para $6,0\text{h}$ e bloqueando a edição manual (\texttt{min\_value=1.0}). & Criação de \texttt{\_parse\_meta\_dia()} preservando $0,0\text{h}$, status \textit{``Feriado / Abono''} e ajuste para \texttt{min\_value=0.0}. \\
+\midrule
+Linhas duplicadas em relatórios & Requisições simultâneas ao webhook podiam gerar duas linhas para a mesma data na planilha. & Implementação de \texttt{\_deduplicate\_records()} em \texttt{storage.py} e \texttt{drop\_duplicates()} em \texttt{calculations.py}, garantindo unicidade por data. \\
+\midrule
+Lentidão a cada clique na interface & O banco de dados era baixado da nuvem em toda re-execução do script Streamlit. & Cacheamento em \texttt{st.session\_state.db} com atualização automática ao salvar e botão \textit{``Sincronizar Nuvem''} na barra lateral. \\
+\midrule
+Excesso de documentos na visão da chefia & Existência de dois modelos de folha (Espelho A4 genérico e Boletim FUSP). & Remoção do Espelho A4 genérico na visão da supervisão, mantendo exclusivamente o \textbf{Boletim de Frequência Oficial da FUSP}. \\
+\bottomrule
+\end{longtable}
+
+% ============================================================================
+% 7. GUIA RÁPIDO DE OPERAÇÃO E CREDENCIAIS
+% ============================================================================
+\section{Guia Rápido de Operação e Credenciais}
+
+\begin{warnBox}{Dados de Acesso e Links Oficiais}
+\begin{itemize}[leftmargin=1.5em, itemsep=3pt]
+    \item \textbf{Link Oficial (Nuvem):} \url{https://ponto-estagio-carlos.streamlit.app}
+    \item \textbf{Link Direto para a Supervisora (Somente Leitura):} \url{https://ponto-estagio-carlos.streamlit.app/?acesso=gestao}
+    \item \textbf{Usuário Padrão (Estagiário):} \texttt{carlos}
+    \item \textbf{Senha Padrão Inicial:} \texttt{1122} \textit{(pode ser alterada a qualquer momento na tela de login ou na barra lateral em ``Configurações \& Contrato'', ficando salva na planilha da nuvem)}.
+\end{itemize}
+\end{warnBox}
+
+\subsection{Rotina Mensal de Fechamento FUSP}
+\begin{enumerate}[leftmargin=1.5em]
+    \item Registre normalmente suas entradas, pausas e saídas diariamente pelo painel \textbf{Registro Rápido}.
+    \item Caso esqueça alguma batida ou haja um feriado/recesso, utilize a aba \textbf{Ajuste Manual} (para feriados, basta definir a carga do dia como \texttt{0.0} e informar \textit{``Feriado''} na observação).
+    \item Ao encerrar o expediente do \textbf{dia 20 de cada mês} (fechamento do ciclo FUSP $21/\text{mês}-1$ a $20/\text{mês}$), acesse a aba \textbf{Boletim FUSP}.
+    \item Clique em \textbf{``BAIXAR BOLETIM FUSP PREENCHIDO (HTML / PDF)''} ou no botão \textbf{``Imprimir / Salvar como PDF''} dentro da prévia do documento para gerar o PDF oficial, colher as assinaturas e encaminhar até o dia 22.
+\end{enumerate}
+
+\vspace{1.0cm}
+\begin{center}
+\rule{0.5\linewidth}{0.4pt}\\[0.2cm]
+{\small \textbf{Documento Técnico Gerado em \LaTeX}}\\
+{\footnotesize Sistema de Ponto Eletrônico ICMC $\bullet$ USP --- Outubro de 2026}
+\end{center}
+
+\end{document}

@@ -16,8 +16,8 @@ from calculations import (
     format_time_str,
     compute_current_elapsed_time,
     get_business_days_in_month,
+    get_expected_business_days,
     detect_compliance_issues,
-    generate_printable_timesheet_html,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
     now_br,
@@ -27,9 +27,15 @@ from theme import ICMC_COLORS, get_knot_svg_html, render_html
 
 
 def compute_auth_token(usuario: str, senha: str) -> str:
-    """Gera token de sessão verificável para manter o login ativo após atualizar a página."""
-    raw = f"icmc_auth:{usuario.strip().lower()}:{senha.strip()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    """Gera token de sessão verificável com salt para manter o login ativo após atualizar a página."""
+    try:
+        salt = st.secrets.get("auth_salt", "icmc_usp_fusp_605001_salt")
+        if not isinstance(salt, str) or not salt:
+            salt = "icmc_usp_fusp_605001_salt"
+    except Exception:
+        salt = "icmc_usp_fusp_605001_salt"
+    raw = f"icmc_auth:{salt}:{usuario.strip().lower()}:{senha.strip()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
 # Cookie "Lembrar login": guarda o token no navegador para não pedir usuário/senha a cada acesso.
@@ -126,10 +132,11 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
         meta_total = 0.0
     else:
         concluidos = df_mes[df_mes["Status"] == "Concluído"]
+        apurados = df_mes[df_mes["Status"].isin(["Concluído", "Ausente"])]
         dias_trab = len(concluidos)
         horas_totais = concluidos["Horas Trabalhadas"].sum()
-        saldo_total = concluidos["Saldo (h)"].sum()
-        meta_total = concluidos["Meta (h)"].sum()
+        saldo_total = apurados["Saldo (h)"].sum()
+        meta_total = apurados["Meta (h)"].sum()
 
     horas_totais_fmt = decimal_hours_to_hm_str(horas_totais)
     meta_total_fmt = decimal_hours_to_hm_str(meta_total)
@@ -435,6 +442,8 @@ def render_manager_screen(
     ano: int,
     mes: int,
     mes_nome: str,
+    periodo_datas: Optional[List[date]] = None,
+    rotulo_periodo: Optional[str] = None,
 ):
     """
     Renderiza o painel executivo consolidado da chefia com design minimalista metálico.
@@ -447,6 +456,7 @@ def render_manager_screen(
     empresa = config.get("empresa_setor", "ICMC / USP")
     carga = float(config.get("carga_horaria_diaria", 6.0))
     dias_uteis_cfg = config.get("dias_uteis", ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"])
+    periodo_exibicao = rotulo_periodo if rotulo_periodo else f"{mes_nome} de {ano}"
 
     knot_svg = get_knot_svg_html(size=32)
 
@@ -475,7 +485,7 @@ def render_manager_screen(
                 <div><span style="color: {ICMC_COLORS['text_muted']};">SUPERVISOR(A)</span><br><strong style="font-size: 0.95rem;">{nome_supervisor}</strong></div>
                 <div><span style="color: {ICMC_COLORS['text_muted']};">DEPARTAMENTO / SETOR</span><br><strong style="font-size: 0.95rem;">{empresa}</strong></div>
                 <div><span style="color: {ICMC_COLORS['text_muted']};">CARGA CONTRATUAL</span><br><strong style="font-size: 0.95rem;">{carga:g}h / dia (30h semanais)</strong></div>
-                <div><span style="color: {ICMC_COLORS['text_muted']};">PERÍODO DE APURAÇÃO</span><br><strong style="font-size: 0.95rem;">{mes_nome} de {ano}</strong></div>
+                <div><span style="color: {ICMC_COLORS['text_muted']};">PERÍODO DE APURAÇÃO</span><br><strong style="font-size: 0.95rem;">{periodo_exibicao}</strong></div>
             </div>
         </div>
         """
@@ -523,14 +533,18 @@ def render_manager_screen(
         """
     )
 
-    dias_uteis_mes = get_business_days_in_month(ano, mes, dias_uteis_cfg)
+    dias_uteis_decorridos, dias_uteis_mes = get_expected_business_days(
+        ano, mes, dias_uteis_cfg, registros, periodo_datas=periodo_datas
+    )
     meta_horas_mes = dias_uteis_mes * carga
+    meta_horas_decorridas = dias_uteis_decorridos * carga
 
     if not df_mes.empty:
         concluidos = df_mes[df_mes["Status"] == "Concluído"]
+        apurados = df_mes[df_mes["Status"].isin(["Concluído", "Ausente"])]
         dias_trab = len(concluidos)
         horas_realizadas = concluidos["Horas Trabalhadas"].sum()
-        saldo_mes = concluidos["Saldo (h)"].sum()
+        saldo_mes = apurados["Saldo (h)"].sum()
         media_dia = horas_realizadas / dias_trab if dias_trab > 0 else 0.0
     else:
         dias_trab = 0
@@ -538,16 +552,16 @@ def render_manager_screen(
         saldo_mes = 0.0
         media_dia = 0.0
 
-    pct_meta = (horas_realizadas / meta_horas_mes * 100) if meta_horas_mes > 0 else 0
-    pct_assiduidade = (dias_trab / dias_uteis_mes * 100) if dias_uteis_mes > 0 else 0
+    pct_meta = (horas_realizadas / meta_horas_mes * 100) if meta_horas_mes > 0 else 0.0
+    pct_assiduidade = (dias_trab / dias_uteis_decorridos * 100) if dias_uteis_decorridos > 0 else 100.0
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     with kpi1:
         st.metric(
             label="Assiduidade / Presença",
-            value=f"{dias_trab} de {dias_uteis_mes} dias",
-            delta=f"{pct_assiduidade:.1f}% dos dias úteis",
+            value=f"{dias_trab} / {dias_uteis_decorridos} dias",
+            delta=f"{pct_assiduidade:.0f}% até hoje ({dias_uteis_mes} dias úteis no período)",
             delta_color="normal",
         )
 
@@ -555,7 +569,7 @@ def render_manager_screen(
         st.metric(
             label="Horas Realizadas",
             value=decimal_hours_to_hm_str(horas_realizadas),
-            delta=f"{pct_meta:.1f}% da meta ({meta_horas_mes:g}h)",
+            delta=f"{pct_meta:.1f}% da meta do período ({meta_horas_mes:g}h)",
             delta_color="normal",
         )
 
@@ -586,11 +600,18 @@ def render_manager_screen(
     st.markdown("<br>", unsafe_allow_html=True)
 
     issues = detect_compliance_issues(registros, carga)
-    prefixo_mes = f"{ano:04d}-{mes:02d}"
-    issues_mes = [
-        iss for iss in issues
-        if iss.get("raw_date", "").startswith(prefixo_mes)
-    ]
+    if periodo_datas is not None:
+        datas_periodo_set = {d.strftime("%Y-%m-%d") for d in periodo_datas}
+        issues_mes = [
+            iss for iss in issues
+            if iss.get("raw_date", "") in datas_periodo_set
+        ]
+    else:
+        prefixo_mes = f"{ano:04d}-{mes:02d}"
+        issues_mes = [
+            iss for iss in issues
+            if iss.get("raw_date", "").startswith(prefixo_mes)
+        ]
 
     st.markdown("#### AUDITORIA & CONFORMIDADE COM A LEI DO ESTÁGIO")
     if not issues_mes:

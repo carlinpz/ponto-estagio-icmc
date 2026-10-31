@@ -3,8 +3,10 @@ Módulo de Persistência e Gerenciamento de Dados do Ponto Eletrônico.
 Salva e carrega dados em JSON local (ponto_eletronico.json), com suporte a exportação CSV.
 """
 
+import copy
 import json
 import os
+import threading
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Optional
 import pandas as pd
@@ -87,60 +89,24 @@ def _parse_meta_dia(v: Any, obs: str = "", default: float = 6.0) -> float:
     return default
 
 
-def generate_sample_records_if_empty(target_hours: float = 6.0) -> List[Dict[str, Any]]:
-    """
-    Gera alguns registros de exemplo no mês atual para que o usuário
-    possa visualizar o funcionamento do dashboard e dos gráficos imediatamente.
-    """
-    hoje = date.today()
-    sample_records = []
-    
-    # Gera registros para os dias úteis passados dos últimos 10 dias
-    for i in range(12, 0, -1):
-        dia = hoje - timedelta(days=i)
-        # Segunda a Sexta: 0 a 4
-        if dia.weekday() < 5:
-            if i % 3 == 0:
-                entrada = "09:00:00"
-                ini_p = "12:00:00"
-                fim_p = "12:15:00"
-                saida = "15:30:00"
-                obs = "Estudo técnico"
-            elif i % 3 == 1:
-                entrada = "09:05:00"
-                ini_p = "12:30:00"
-                fim_p = "12:45:00"
-                saida = "15:10:00"
-                obs = "Compromisso acadêmico"
-            else:
-                entrada = "09:00:00"
-                ini_p = "12:00:00"
-                fim_p = "12:15:00"
-                saida = "15:15:00"
-                obs = "Jornada regular"
-
-            sample_records.append({
-                "data": dia.strftime("%Y-%m-%d"),
-                "entrada": entrada,
-                "inicio_pausa": ini_p,
-                "fim_pausa": fim_p,
-                "saida": saida,
-                "meta_dia": target_hours,
-                "observacao": obs,
-            })
-
-    return sample_records
+def _get_secret_or_default(key: str, default_val: str) -> str:
+    """Obtém uma chave de st.secrets ou variáveis de ambiente (os.environ) com fallback para o valor padrão."""
+    env_val = os.environ.get(key) or os.environ.get(key.upper())
+    if env_val and str(env_val).strip():
+        return str(env_val).strip()
+    try:
+        import streamlit as st
+        val = st.secrets.get(key, default_val)
+        return str(val).strip() if val else default_val
+    except Exception:
+        return default_val
 
 
 def is_cloud_configured() -> bool:
-    """Verifica se o Google Sheets está configurado via Apps Script, URL padrão ou Service Account."""
-    if DEFAULT_APPS_SCRIPT_URL:
-        return True
-    try:
-        import streamlit as st
-        return "apps_script_url" in st.secrets or ("gcp_service_account" in st.secrets and "spreadsheet_url" in st.secrets)
-    except Exception:
-        return False
+    """Verifica se o Google Sheets está configurado via Apps Script ou URL da planilha."""
+    apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
+    sheet_url = _get_secret_or_default("spreadsheet_url", DEFAULT_SPREADSHEET_CSV_URL)
+    return bool(apps_url or sheet_url)
 
 
 def _clean_cloud_time(v: Optional[str]) -> Optional[str]:
@@ -311,129 +277,6 @@ def save_database_to_apps_script(url: str, data: Dict[str, Any]):
         raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
 
 
-def get_gspread_client():
-    """Retorna cliente autenticado do Google Sheets usando as credenciais do Streamlit."""
-    import streamlit as st
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    sa_info = dict(st.secrets["gcp_service_account"])
-    creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
-    return gspread.authorize(creds)
-
-
-def load_database_from_sheets() -> Dict[str, Any]:
-    """Lê registros e configurações diretamente da planilha do Google Drive via gspread."""
-    import streamlit as st
-    client = get_gspread_client()
-    sheet_url = st.secrets["spreadsheet_url"]
-    sh = client.open_by_url(sheet_url)
-
-    # 1. Carrega registros
-    try:
-        ws_reg = sh.worksheet("Registros")
-        records_data = ws_reg.get_all_records()
-    except Exception:
-        ws_reg = sh.sheet1
-        records_data = ws_reg.get_all_records()
-
-    registros = []
-    for r in records_data:
-        data_val = str(r.get("data", "")).strip()
-        if not data_val or data_val in ("CONFIG_JSON", "__CONFIG__"):
-            continue
-        registros.append({
-            "data": data_val,
-            "entrada": str(r.get("entrada", "")).strip() if r.get("entrada") else None,
-            "inicio_pausa": str(r.get("inicio_pausa", "")).strip() if r.get("inicio_pausa") else None,
-            "fim_pausa": str(r.get("fim_pausa", "")).strip() if r.get("fim_pausa") else None,
-            "saida": str(r.get("saida", "")).strip() if r.get("saida") else None,
-            "meta_dia": _parse_meta_dia(r.get("meta_dia"), 6.0),
-            "observacao": str(r.get("observacao", "")),
-        })
-
-    # 2. Carrega configurações da aba Config (se existir)
-    config = DEFAULT_CONFIG.copy()
-    try:
-        ws_cfg = sh.worksheet("Config")
-        cfg_rows = ws_cfg.get_all_records()
-        for row in cfg_rows:
-            k = row.get("chave")
-            v = row.get("valor")
-            if k and v is not None:
-                if k == "carga_horaria_diaria":
-                    config[k] = float(v)
-                elif k == "dias_uteis" and isinstance(v, str):
-                    config[k] = [d.strip() for d in v.split(",") if d.strip()]
-                else:
-                    config[k] = v
-    except Exception:
-        pass
-
-    return {"config": config, "registros": registros}
-
-
-def save_database_to_sheets(data: Dict[str, Any]):
-    """Sincroniza os dados locais de volta para a planilha do Google Sheets via gspread."""
-    import streamlit as st
-    client = get_gspread_client()
-    sheet_url = st.secrets["spreadsheet_url"]
-    sh = client.open_by_url(sheet_url)
-
-    # Atualiza aba Registros
-    try:
-        ws_reg = sh.worksheet("Registros")
-    except Exception:
-        ws_reg = sh.sheet1
-
-    cols = ["data", "entrada", "inicio_pausa", "fim_pausa", "saida", "meta_dia", "observacao"]
-    rows = [cols]
-    for r in data.get("registros", []):
-        if str(r.get("data", "")).strip() in ("CONFIG_JSON", "__CONFIG__", ""):
-            continue
-        rows.append([
-            r.get("data", ""),
-            r.get("entrada") or "",
-            r.get("inicio_pausa") or "",
-            r.get("fim_pausa") or "",
-            r.get("saida") or "",
-            r.get("meta_dia", 6.0),
-            r.get("observacao", ""),
-        ])
-    ws_reg.clear()
-    ws_reg.update(rows)
-
-    # Atualiza aba Config
-    try:
-        ws_cfg = sh.worksheet("Config")
-    except Exception:
-        ws_cfg = sh.add_worksheet(title="Config", rows=20, cols=5)
-
-    cfg_rows = [["chave", "valor"]]
-    for k, v in data.get("config", {}).items():
-        if isinstance(v, list):
-            val_str = ", ".join(v)
-        else:
-            val_str = str(v)
-        cfg_rows.append([k, val_str])
-    ws_cfg.clear()
-    ws_cfg.update(cfg_rows)
-
-
-def _get_secret_or_default(key: str, default_val: str) -> str:
-    """Obtém uma chave do st.secrets com fallback seguro para o valor padrão."""
-    try:
-        import streamlit as st
-        val = st.secrets.get(key, default_val)
-        return val if val else default_val
-    except Exception:
-        return default_val
-
-
 def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
     """
     Carrega o banco de dados.
@@ -504,10 +347,15 @@ def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
     return initial_data
 
 
-def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH, sync_cloud: bool = True) -> bool:
+def save_database(
+    data: Dict[str, Any],
+    filepath: str = DEFAULT_DATA_PATH,
+    sync_cloud: bool = True,
+    async_cloud: bool = True,
+) -> bool:
     """
     Salva os dados de forma segura no JSON local e, se sync_cloud for True e a nuvem estiver ativa,
-    sincroniza em tempo real com o Google Sheets.
+    sincroniza com o Google Sheets (em thread de background quando async_cloud=True).
     """
     # Garante que CONFIG_JSON e duplicatas nunca fiquem na lista em memória/JSON local
     if "registros" in data and isinstance(data["registros"], list):
@@ -531,14 +379,20 @@ def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH, sync_
 
     # Sincronização em nuvem se solicitada e habilitada
     if sync_cloud and is_cloud_configured():
-        try:
-            apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
-            if apps_url:
-                save_database_to_apps_script(apps_url, data)
+        apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
+        if apps_url:
+            payload_copy = copy.deepcopy(data)
+
+            def _worker():
+                try:
+                    save_database_to_apps_script(apps_url, payload_copy)
+                except Exception as e:
+                    print(f"Aviso: Erro ao sincronizar com Google Sheets: {e}")
+
+            if async_cloud:
+                threading.Thread(target=_worker, daemon=True).start()
             else:
-                save_database_to_sheets(data)
-        except Exception as e:
-            print(f"Aviso: Erro ao sincronizar com Google Sheets: {e}")
+                _worker()
 
     return saved_local
 

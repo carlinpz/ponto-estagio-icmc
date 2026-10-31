@@ -255,10 +255,7 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
     # Ordenar por data cronológica e garantir unicidade
     if not df.empty and "date_obj" in df.columns:
         df = df.drop_duplicates(subset=["raw_date"], keep="last").sort_values(by="raw_date", ascending=True).reset_index(drop=True)
-        # Calcula saldo acumulado para dias concluídos
-        mask_concluido = df["Status"] == "Concluído"
-        df["Saldo Acumulado (h)"] = 0.0
-        df.loc[mask_concluido, "Saldo Acumulado (h)"] = df.loc[mask_concluido, "Saldo (h)"].cumsum().round(2)
+        df["Saldo Acumulado (h)"] = df["Saldo (h)"].cumsum().round(2)
         df["Saldo Acumulado Formatado"] = df["Saldo Acumulado (h)"].apply(lambda s: decimal_hours_to_hm_str(s, show_sign=True))
 
     return df
@@ -275,6 +272,62 @@ def get_business_days_in_month(year: int, month: int, working_weekdays: List[str
         if nome_dia in working_weekdays:
             count += 1
     return count
+
+
+def get_expected_business_days(
+    year: int,
+    month: int,
+    working_weekdays: List[str],
+    records: List[Dict[str, Any]],
+    periodo_datas: Optional[List[date]] = None,
+) -> Tuple[int, int]:
+    """
+    Retorna (dias_uteis_decorridos_ate_hoje, dias_uteis_totais_no_periodo) respeitando:
+    1. A data de início real do contrato (menor data válida em records, ex: '2026-09-28').
+    2. Feriados, recessos ou abonos lançados com meta_dia == 0.0 ou palavras-chave na observação.
+    3. A data atual em Brasília (today_br()), para calcular assiduidade real até o dia de hoje.
+    """
+    import calendar
+    hoje = today_br()
+
+    datas_validas = [
+        str(r.get("data", "")).strip()
+        for r in records
+        if r.get("data") and str(r.get("data", "")).strip() not in ("CONFIG_JSON", "__CONFIG__", "")
+    ]
+    inicio_contrato_str = min(datas_validas) if datas_validas else "1970-01-01"
+
+    feriados_set = set()
+    for r in records:
+        d_s = str(r.get("data", "")).strip()
+        if not d_s or d_s in ("CONFIG_JSON", "__CONFIG__"):
+            continue
+        meta_val = r.get("meta_dia")
+        obs_val = str(r.get("observacao", "") or "").lower()
+        if (meta_val is not None and float(meta_val) == 0.0) or any(
+            k in obs_val for k in ("feriado", "recesso", "dispensa", "abono", "folga")
+        ):
+            feriados_set.add(d_s)
+
+    if periodo_datas is None:
+        _, total_days = calendar.monthrange(year, month)
+        datas_analise = [date(year, month, day) for day in range(1, total_days + 1)]
+    else:
+        datas_analise = periodo_datas
+
+    uteis_totais = 0
+    uteis_decorridos = 0
+
+    for d in datas_analise:
+        d_str = d.strftime("%Y-%m-%d")
+        if d_str < inicio_contrato_str or d_str in feriados_set:
+            continue
+        if get_weekday_name(d) in working_weekdays:
+            uteis_totais += 1
+            if d <= hoje:
+                uteis_decorridos += 1
+
+    return uteis_decorridos, uteis_totais
 
 
 def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float) -> List[Dict[str, str]]:
@@ -379,207 +432,6 @@ function imprimirDocumento() {
 }
 </script>
 """
-
-
-def generate_printable_timesheet_html(
-    df_mes: pd.DataFrame,
-    config: Dict[str, Any],
-    mes_nome: str,
-    ano: int,
-) -> str:
-    """
-    Gera o código HTML completo e estilizado para visualização e impressão da
-    Folha de Ponto / Espelho Mensal de Estágio com campos de validação da chefia.
-    """
-    nome_estagiario = config.get("nome_estagiario", "Estagiário(a)")
-    nome_supervisor = config.get("nome_supervisor", "Gestor(a) / Supervisor(a)")
-    empresa = config.get("empresa_setor", "Empresa / Setor de Atuação")
-    carga = config.get("carga_horaria_diaria", 6.0)
-
-    # Totais
-    if not df_mes.empty:
-        concluidos = df_mes[df_mes["Status"] == "Concluído"]
-        dias_trab = len(concluidos)
-        total_horas = concluidos["Horas Trabalhadas"].sum()
-        total_saldo = concluidos["Saldo (h)"].sum()
-        total_horas_fmt = decimal_hours_to_hm_str(total_horas)
-        total_saldo_fmt = decimal_hours_to_hm_str(total_saldo, show_sign=True)
-    else:
-        dias_trab = 0
-        total_horas_fmt = "00h 00m"
-        total_saldo_fmt = "00h 00m"
-
-    # Montagem das linhas da tabela
-    trows = ""
-    if not df_mes.empty:
-        for _, row in df_mes.iterrows():
-            saldo_str = str(row.get("Saldo Formatado", "-"))
-            color = "#10b981" if saldo_str.startswith("+") else ("#ef4444" if saldo_str.startswith("-") else "inherit")
-            trows += f"""
-            <tr>
-                <td style="text-align: center;">{row.get('Data', '-')}</td>
-                <td>{row.get('Dia da Semana', '-')}</td>
-                <td style="text-align: center;">{row.get('Entrada', '-')}</td>
-                <td style="text-align: center;">{row.get('Início Pausa', '-')}</td>
-                <td style="text-align: center;">{row.get('Fim Pausa', '-')}</td>
-                <td style="text-align: center;">{row.get('Saída', '-')}</td>
-                <td style="text-align: center; font-weight: bold;">{row.get('Horas Formatadas', '-')}</td>
-                <td style="text-align: center; color: {color}; font-weight: bold;">{saldo_str}</td>
-                <td>{limpar_observacao_boletim(row.get('Observação', '')) or '-'}</td>
-            </tr>
-            """
-    else:
-        trows = "<tr><td colspan='9' style='text-align: center; padding: 20px; color: gray;'>Nenhum registro lançado no mês selecionado.</td></tr>"
-
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head>
-        <meta charset="UTF-8">
-        <title>Espelho de Ponto - {nome_estagiario} - {mes_nome}/{ano}</title>
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                margin: 20px;
-                color: #222;
-                background: #fff;
-            }}
-            .header-table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 20px;
-                border-bottom: 2px solid #333;
-                padding-bottom: 10px;
-            }}
-            .header-table td {{
-                padding: 4px 8px;
-            }}
-            .title {{
-                font-size: 20px;
-                font-weight: bold;
-                text-align: center;
-                margin-bottom: 4px;
-            }}
-            .subtitle {{
-                font-size: 13px;
-                text-align: center;
-                color: #555;
-                margin-bottom: 16px;
-            }}
-            .report-table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 15px;
-                font-size: 12px;
-            }}
-            .report-table th {{
-                background-color: #f3f4f6;
-                color: #111;
-                font-weight: bold;
-                border: 1px solid #d1d5db;
-                padding: 6px;
-            }}
-            .report-table td {{
-                border: 1px solid #e5e7eb;
-                padding: 6px;
-            }}
-            .summary-box {{
-                margin-top: 20px;
-                display: flex;
-                justify-content: space-between;
-                background: #f9fafb;
-                border: 1px solid #d1d5db;
-                padding: 12px;
-                border-radius: 6px;
-                font-size: 13px;
-            }}
-            .signatures {{
-                margin-top: 50px;
-                width: 100%;
-                display: flex;
-                justify-content: space-between;
-            }}
-            .sig-line {{
-                width: 45%;
-                text-align: center;
-                border-top: 1px solid #000;
-                padding-top: 6px;
-                font-size: 12px;
-            }}
-            @media print {{
-                body {{ margin: 0; }}
-                .no-print {{ display: none; }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="no-print" style="margin-bottom: 16px; text-align: right;">
-            <button onclick="imprimirDocumento()" style="padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-                🖨️ Imprimir / Salvar em PDF
-            </button>
-        </div>
-        {PRINT_SCRIPT}
-
-        <div class="title">RELATÓRIO MENSAL DE PONTO ELETRÔNICO E BANCO DE HORAS</div>
-        <div class="subtitle">Controle de Jornada de Estágio — Lei Federal 11.788/2008</div>
-
-        <table class="header-table">
-            <tr>
-                <td><strong>Estagiário(a):</strong> {nome_estagiario}</td>
-                <td><strong>Período de Referência:</strong> {mes_nome} de {ano}</td>
-            </tr>
-            <tr>
-                <td><strong>Supervisor(a) Responsável:</strong> {nome_supervisor}</td>
-                <td><strong>Carga Horária Contratual:</strong> {carga:g} horas/dia (30h semanais)</td>
-            </tr>
-            <tr>
-                <td colspan="2"><strong>Empresa / Setor:</strong> {empresa}</td>
-            </tr>
-        </table>
-
-        <table class="report-table">
-            <thead>
-                <tr>
-                    <th>Data</th>
-                    <th>Dia da Semana</th>
-                    <th>Entrada</th>
-                    <th>Início Intervalo</th>
-                    <th>Fim Intervalo</th>
-                    <th>Saída</th>
-                    <th>Total Trab.</th>
-                    <th>Saldo do Dia</th>
-                    <th>Observação / Ocorrência</th>
-                </tr>
-            </thead>
-            <tbody>
-                {trows}
-            </tbody>
-        </table>
-
-        <div class="summary-box">
-            <div><strong>Dias Trabalhados:</strong> {dias_trab}</div>
-            <div><strong>Total de Horas Realizadas:</strong> {total_horas_fmt}</div>
-            <div><strong>Saldo do Banco de Horas:</strong> {total_saldo_fmt}</div>
-        </div>
-
-        <div style="margin-top: 25px; font-size: 11px; color: #666; line-height: 1.4;">
-            <em>Declaro que os horários de entrada, intervalos e saída acima informados correspondem à fiel execução das atividades de estágio no período estipulado, em estrita observância ao Termo de Compromisso de Estágio (TCE).</em>
-        </div>
-
-        <div class="signatures">
-            <div class="sig-line">
-                <strong>{nome_estagiario}</strong><br>
-                Estagiário(a)
-            </div>
-            <div class="sig-line">
-                <strong>{nome_supervisor}</strong><br>
-                Supervisor(a) da Concedente
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return html
 
 
 def get_fusp_period_dates(ano: int, mes: int) -> Tuple[date, date, List[date]]:

@@ -226,6 +226,15 @@ with st.sidebar:
             key="filtro_ano",
         )
 
+    modo_periodo = st.radio(
+        "Recorte de Apuração:",
+        options=["Mês Civil (01 a 31)", "Ciclo FUSP (21 a 20)"],
+        index=0,
+        horizontal=True,
+        key="filtro_modo_periodo",
+        help="Alterna KPIs, gráficos e tabelas entre o mês calendário (01 a 30/31) e o ciclo oficial da FUSP (21 do mês anterior a 20 do mês vigente).",
+    )
+
     st.divider()
 
     if st.session_state["perfil_ativo"] == "gestao":
@@ -402,11 +411,24 @@ with st.sidebar:
 # -------------------------------------------------------------
 df_todos = process_records_dataframe(registros, config.get("carga_horaria_diaria", 6.0))
 
-if not df_todos.empty and "raw_date" in df_todos.columns:
-    prefixo_mes = f"{ano_selecionado:04d}-{mes_selecionado:02d}"
-    df_mes = df_todos[df_todos["raw_date"].str.startswith(prefixo_mes)].copy()
+if modo_periodo == "Ciclo FUSP (21 a 20)":
+    inicio_fusp_sel, fim_fusp_sel, datas_fusp_sel = get_fusp_period_dates(ano_selecionado, mes_selecionado)
+    ini_str = inicio_fusp_sel.strftime("%Y-%m-%d")
+    fim_str = fim_fusp_sel.strftime("%Y-%m-%d")
+    periodo_datas_ativo = datas_fusp_sel
+    rotulo_periodo_ativo = f"Ciclo FUSP ({inicio_fusp_sel.strftime('%d/%m')} a {fim_fusp_sel.strftime('%d/%m/%Y')})"
+    if not df_todos.empty and "raw_date" in df_todos.columns:
+        df_mes = df_todos[(df_todos["raw_date"] >= ini_str) & (df_todos["raw_date"] <= fim_str)].copy()
+    else:
+        df_mes = pd.DataFrame()
 else:
-    df_mes = pd.DataFrame()
+    prefixo_mes = f"{ano_selecionado:04d}-{mes_selecionado:02d}"
+    periodo_datas_ativo = None
+    rotulo_periodo_ativo = f"{meses_pt[mes_selecionado - 1]} de {ano_selecionado}"
+    if not df_todos.empty and "raw_date" in df_todos.columns:
+        df_mes = df_todos[df_todos["raw_date"].str.startswith(prefixo_mes)].copy()
+    else:
+        df_mes = pd.DataFrame()
 
 # -------------------------------------------------------------
 # RENDERIZAÇÃO CONFORME PERFIL SELECIONADO
@@ -419,6 +441,8 @@ if st.session_state["perfil_ativo"] == "gestao":
         ano=ano_selecionado,
         mes=mes_selecionado,
         mes_nome=meses_pt[mes_selecionado - 1],
+        periodo_datas=periodo_datas_ativo,
+        rotulo_periodo=rotulo_periodo_ativo,
     )
     st.stop()
 
@@ -559,7 +583,11 @@ with tab_manual:
             submitted = st.form_submit_button("SALVAR REGISTRO MANUAL", use_container_width=True, type="primary")
 
             if submitted:
-                if float(input_meta) == 0.0 and not teve_saida and "feriado" in (input_obs or "").lower():
+                obs_lower = (input_obs or "").lower()
+                is_feriado_ou_abono = float(input_meta) == 0.0 and (
+                    not teve_saida or any(k in obs_lower for k in ("feriado", "recesso", "dispensa", "abono", "folga"))
+                )
+                if is_feriado_ou_abono:
                     novo_reg = {
                         "data": data_ajuste_str,
                         "entrada": None,

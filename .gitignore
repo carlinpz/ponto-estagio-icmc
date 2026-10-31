@@ -18,3 +18,9 @@ env/
 # Caches de sistema operacional
 .DS_Store
 Thumbs.db
+
+# Dados pessoais e arquivos gerados
+ponto_eletronico.json
+projeto_completo.md
+historico_chats/
+.venv/

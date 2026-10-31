@@ -2,7 +2,11 @@
 Script de testes para verificar cálculos, regras de validação e persistência.
 """
 
+import sys
 from datetime import datetime, date, time
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 from calculations import (
     calculate_day_worked_hours,
     decimal_hours_to_hm_str,
@@ -11,8 +15,8 @@ from calculations import (
     process_records_dataframe,
     compute_current_elapsed_time,
     get_business_days_in_month,
+    get_expected_business_days,
     detect_compliance_issues,
-    generate_printable_timesheet_html,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
 )
@@ -85,11 +89,27 @@ def test_all():
     assert len(csv_bytes) > 0
     print("✓ Teste 6 passou: Exportação CSV")
 
-    # Teste 7: Dias úteis no mês
-    from calculations import get_business_days_in_month, detect_compliance_issues, generate_printable_timesheet_html
-    dias_uteis = get_business_days_in_month(2026, 10, ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"])
+    # Teste 7: Dias úteis no mês e get_expected_business_days
+    dias_uteis_padrao = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"]
+    dias_uteis = get_business_days_in_month(2026, 10, dias_uteis_padrao)
     assert dias_uteis == 22, f"Esperado 22 dias úteis em 10/2026, obtido {dias_uteis}"
-    print(f"✓ Teste 7 passou: Cálculo de dias úteis ({dias_uteis} dias)")
+
+    # 7a: Setembro/2026 com início de contrato em 2026-09-28 (28, 29, 30 de setembro -> 3 dias úteis)
+    recs_setembro = [
+        {"data": "2026-09-28", "entrada": "08:00:00", "saida": "14:00:00", "meta_dia": 6.0, "observacao": ""},
+        {"data": "2026-09-29", "entrada": "08:00:00", "saida": "14:00:00", "meta_dia": 6.0, "observacao": ""},
+        {"data": "2026-09-30", "entrada": "08:00:00", "saida": "14:00:00", "meta_dia": 6.0, "observacao": ""},
+    ]
+    _, uteis_set_total = get_expected_business_days(2026, 9, dias_uteis_padrao, recs_setembro)
+    assert uteis_set_total == 3, f"Esperado 3 dias úteis em 09/2026 a partir de 28/09, obtido {uteis_set_total}"
+
+    # 7b: Outubro/2026 com feriado em 2026-10-12 (reduz de 22 para 21 dias úteis)
+    recs_outubro = recs_setembro + [
+        {"data": "2026-10-12", "entrada": None, "saida": None, "meta_dia": 0.0, "observacao": "Feriado Nacional"},
+    ]
+    _, uteis_out_total = get_expected_business_days(2026, 10, dias_uteis_padrao, recs_outubro)
+    assert uteis_out_total == 21, f"Esperado 21 dias úteis em 10/2026 descontando feriado 12/10, obtido {uteis_out_total}"
+    print(f"✓ Teste 7 passou: Cálculo de dias úteis e get_expected_business_days (09/2026={uteis_set_total}, 10/2026={uteis_out_total})")
 
     # Teste 8: Detecção de inconsistências (excesso de horas ou batida pendente)
     inconsistencias = detect_compliance_issues([
@@ -98,14 +118,20 @@ def test_all():
     assert len(inconsistencias) > 0
     print("✓ Teste 8 passou: Detecção de inconformidade legal de estágio")
 
-    # Teste 9: Geração de Folha de Ponto HTML
-    cfg_test = {"nome_estagiario": "João", "nome_supervisor": "Maria", "empresa_setor": "TI", "carga_horaria_diaria": 6.0}
-    html_rep = generate_printable_timesheet_html(df, cfg_test, "Outubro", 2026)
-    assert "RELATÓRIO MENSAL DE PONTO ELETRÔNICO" in html_rep
-    assert "Maria" in html_rep
-    print("✓ Teste 9 passou: Geração de Folha de Ponto HTML para impressão")
+    # Teste 9: Preservação do Saldo Acumulado (h) em dias de Feriado / Abono após dias com saldo positivo
+    recs_acum = [
+        {"data": "2026-10-09", "entrada": "08:00:00", "inicio_pausa": None, "fim_pausa": None, "saida": "15:00:00", "meta_dia": 6.0, "observacao": "Sexta (+1h)"},
+        {"data": "2026-10-12", "entrada": None, "inicio_pausa": None, "fim_pausa": None, "saida": None, "meta_dia": 0.0, "observacao": "Feriado"},
+    ]
+    df_acum = process_records_dataframe(recs_acum, 6.0)
+    assert df_acum.iloc[0]["Saldo Acumulado (h)"] == 1.0
+    assert df_acum.iloc[1]["Status"] == "Feriado / Abono"
+    assert df_acum.iloc[1]["Saldo Acumulado (h)"] == 1.0, f"Esperado saldo acumulado 1.0 preservado no feriado, obtido {df_acum.iloc[1]['Saldo Acumulado (h)']}"
+    assert df_acum.iloc[1]["Saldo Acumulado Formatado"] == "+01h 00m"
+    print("✓ Teste 9 passou: Preservação contínua do Saldo Acumulado em Feriado / Abono")
 
     # Teste 10: Geração do Boletim de Frequência FUSP
+    cfg_test = {"nome_estagiario": "João", "nome_supervisor": "Maria", "empresa_setor": "TI", "carga_horaria_diaria": 6.0}
     ini_fusp, fim_fusp, datas_fusp = get_fusp_period_dates(2026, 10)
     assert ini_fusp == date(2026, 9, 21)
     assert fim_fusp == date(2026, 10, 20)
@@ -127,7 +153,7 @@ def test_all():
     assert df_hol.iloc[0]["Meta (h)"] == 0.0
     print("✓ Teste 11 passou: Tratamento de feriado (meta 0.0) e filtro de CONFIG_JSON")
 
-    # Teste 12: Persistência de usuário e senha, geração de token e cookie de "Lembrar login"
+    # Teste 12: Persistência de usuário e senha, geração de token com salt e cookie de "Lembrar login"
     import sys
     from unittest.mock import MagicMock
     if "streamlit" not in sys.modules:
@@ -151,7 +177,7 @@ def test_all():
     assert merged["usuario_estagiario"] == "carlos"
     assert merged["pin_estagiario"] == "1122"
     tok = compute_auth_token("carlos", "1122")
-    assert len(tok) == 16
+    assert len(tok) == 24
     assert tok == compute_auth_token("CARLOS ", " 1122 ")
     agendar_cookie_login(tok)
     assert st.session_state.get("_cookie_acao") == "set"
@@ -160,7 +186,7 @@ def test_all():
     agendar_cookie_login(None)
     assert st.session_state.get("_cookie_acao") == "clear"
     assert st.session_state.get("login_lembrado") is False
-    print("✓ Teste 12 passou: Autenticação por usuário/senha, cookie lembrar login e proteção de credenciais")
+    print("✓ Teste 12 passou: Autenticação por usuário/senha com salt (24 hex), cookie lembrar login e proteção de credenciais")
 
     print("TODOS OS TESTES PASSARAM COM SUCESSO! 🎉")
 

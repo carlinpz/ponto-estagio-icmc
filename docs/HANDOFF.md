@@ -5,7 +5,22 @@ Resume a análise do projeto, o que já foi feito e o que falta.
 
 ---
 
-## STATUS em 01/11/2026 (noite) — leia antes da seção 0
+## STATUS em 01/11/2026 (madrugada, mais recente) — leia antes de tudo
+
+- **Etapa 4 ✅**: app publicado no Streamlit Cloud, acesso só para convidados (login Google).
+- **Apps Script novo ✅** no ar: GET responde `versao: 2` e POST com segredo errado é recusado.
+- **Repositório privado ✅** (esteve público: o histórico tem a URL do Apps Script, os links CSV da
+  planilha e o `ponto_eletronico.json` antigo). Conferido: os 5 links CSV do histórico não abrem mais
+  e a URL do Apps Script exige o segredo. Se o repo voltar a ser público, limpar o histórico antes.
+- **Bug corrigido (commit 32475cd)**: no Cloud, F5 deslogava porque o proxy não repassa o cookie
+  `ponto_icmc_auth` ao servidor (`st.context.cookies` vem sem ele). Agora `ler_cookie_no_navegador`
+  (`components.py`, componente `st.components.v2`) lê o cookie no navegador uma vez por sessão e o
+  servidor valida o token como antes. Testado no site. Requer `streamlit>=1.66.0`.
+- **Pendente, depende do Carlos:** trocar a senha do estagiário (foi exposta num chat; ele adiou —
+  `python gerar_hash_senha.py` e atualizar `senha_estagiario_hash` no secrets local e no Cloud);
+  Etapa 5 (os 3 registros de outubro, pelo app); Etapa 6.
+
+## STATUS em 01/11/2026 (noite)
 
 - Etapa 1 ✅. **Etapa 2 ✅ no código** (sync por registro, síncrono, aviso + reenvio; `apps_script/Code.gs`
   escrito com segredo, trava `LockService`, remoção automática da linha `CONFIG_JSON`).

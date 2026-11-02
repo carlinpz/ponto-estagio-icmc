@@ -42,9 +42,35 @@ def get_auth_cookie() -> Optional[str]:
         return None
 
 
-def perfil_do_cookie() -> Optional[str]:
-    """Perfil ('estagiario' ou 'gestao') do login lembrado, se o token for válido e não tiver expirado."""
-    return auth.validar_token_login(get_auth_cookie(), _get_secret_or_default("cookie_secret"))
+def perfil_do_cookie(valor: Optional[str] = None) -> Optional[str]:
+    """
+    Perfil ('estagiario' ou 'gestao') do login lembrado, se o token for válido e não tiver expirado.
+    Sem `valor`, usa o cookie que chegou ao servidor; com `valor`, o lido no navegador.
+    """
+    if valor is None:
+        valor = get_auth_cookie()
+    return auth.validar_token_login(valor, _get_secret_or_default("cookie_secret"))
+
+
+# No Streamlit Cloud o app fica atrás de um proxy que NÃO repassa nosso cookie ao servidor
+# (st.context.cookies chega sem ele). Por isso o cookie também é lido no próprio navegador
+# e devolvido ao Python por um componente v2 (roda na página, sem iframe, e não desenha nada).
+_JS_LEITOR_COOKIE = """
+export default function (component) {
+  const { setStateValue } = component
+  const prefixo = "__NOME__="
+  const item = document.cookie.split("; ").find((c) => c.startsWith(prefixo))
+  setStateValue("valor", item ? item.slice(prefixo.length) : "")
+}
+""".replace("__NOME__", AUTH_COOKIE_NAME)
+
+_leitor_cookie = st.components.v2.component("leitor_login_lembrado", js=_JS_LEITOR_COOKIE)
+
+
+def ler_cookie_no_navegador() -> Optional[str]:
+    """Valor do cookie de login lido no navegador: None enquanto o navegador não respondeu, "" se não existe."""
+    resultado = _leitor_cookie(key="leitor_login_lembrado", on_valor_change=lambda: None)
+    return getattr(resultado, "valor", None)
 
 
 def login_configurado(perfil: str) -> bool:
@@ -67,6 +93,7 @@ def iniciar_sessao(perfil: str, lembrar: bool):
     """Marca a sessão como autenticada e agenda (ou remove) o cookie de login lembrado."""
     st.session_state["perfil_ativo"] = perfil
     st.session_state["autenticado_estagiario"] = perfil == "estagiario"
+    st.session_state["_ler_cookie_navegador"] = False  # login manual vence uma resposta atrasada do navegador
     segredo = _get_secret_or_default("cookie_secret")
     if lembrar and segredo:
         agendar_cookie_login(auth.gerar_token_login(perfil, segredo, dias=AUTH_COOKIE_DIAS))

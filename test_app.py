@@ -392,6 +392,46 @@ def test_tela_de_login_nao_expoe_token_nem_senha(app_offline):
     assert "token" not in pagina.lower()
 
 
+def test_login_lembrado_lido_no_navegador_quando_servidor_nao_recebe_cookie(app_offline, monkeypatch):
+    """Bug do Streamlit Cloud: o proxy não repassa o cookie ao servidor, então o F5 deslogava."""
+    import components
+    tok = auth.gerar_token_login("estagiario", "cookie-secret-de-teste")
+    monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: tok)
+    at = app_offline.run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] == "estagiario"
+    assert not any("ENTRAR NO MEU PONTO" in b.label for b in at.button)
+
+
+def test_login_lembrado_do_navegador_invalido_mostra_login(app_offline, monkeypatch):
+    import components
+    monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: "estagiario.9999999999.falsa")
+    at = app_offline.run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] is None
+
+
+def test_login_manual_ignora_resposta_atrasada_do_navegador(app_offline, monkeypatch):
+    """Entrar como chefia sem 'Lembrar' e depois ir para o estagiário não pode reaproveitar o cookie antigo."""
+    import components
+    tok = auth.gerar_token_login("estagiario", "cookie-secret-de-teste")
+    resposta = {"valor": None}  # navegador ainda não respondeu
+    monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: resposta["valor"])
+    at = app_offline.run()
+    [t for t in at.text_input if "chefia" in t.label.lower()][0].input(SENHA_CHEFIA_TESTE)
+    [c for c in at.checkbox if "Lembrar neste navegador" in c.label][0].uncheck()
+    [b for b in at.button if "SUPERVISOR" in b.label][0].click().run()
+    assert at.session_state["perfil_ativo"] == "gestao"
+
+    resposta["valor"] = tok  # resposta atrasada chega com o login antigo
+    at.button(key="btn_switch_to_estag").click().run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] is None
+
+
 def test_login_estagiario_senha_errada_e_certa(app_offline):
     at = app_offline.run()
     at.text_input[0].input("carlos")

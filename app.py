@@ -47,6 +47,7 @@ from components import (
     render_manager_screen,
     render_welcome_screen,
     perfil_do_cookie,
+    ler_cookie_no_navegador,
     agendar_cookie_login,
     sync_auth_cookie,
 )
@@ -136,9 +137,22 @@ if "perfil_ativo" not in st.session_state:
     st.session_state["perfil_ativo"] = perfil_lembrado
     st.session_state["autenticado_estagiario"] = perfil_lembrado == "estagiario"
     st.session_state["login_lembrado"] = perfil_lembrado is not None
+    # Se o servidor não recebeu o cookie (caso do Streamlit Cloud), pergunta uma vez ao navegador
+    st.session_state["_ler_cookie_navegador"] = perfil_lembrado is None
 
 # Grava/remove o cookie "Lembrar login" se houver ação pendente (após login ou logout)
 sync_auth_cookie()
+
+if st.session_state.get("_ler_cookie_navegador"):
+    valor_cookie = ler_cookie_no_navegador()
+    if valor_cookie is not None:  # None = navegador ainda não respondeu; o componente provoca um rerun
+        st.session_state["_ler_cookie_navegador"] = False
+        perfil_lembrado = perfil_do_cookie(valor_cookie)
+        if perfil_lembrado and st.session_state["perfil_ativo"] is None:
+            st.session_state["perfil_ativo"] = perfil_lembrado
+            st.session_state["autenticado_estagiario"] = perfil_lembrado == "estagiario"
+            st.session_state["login_lembrado"] = True
+            st.rerun()
 
 # Se nenhum perfil estiver ativo, exibe a tela inicial de seleção e login:
 if st.session_state["perfil_ativo"] is None:
@@ -186,6 +200,7 @@ with st.sidebar:
             if st.button("Sair", use_container_width=True, key="btn_logout", help="Encerrar sessão e voltar para a tela de login"):
                 st.session_state["perfil_ativo"] = None
                 st.session_state["autenticado_estagiario"] = False
+                st.session_state["_ler_cookie_navegador"] = False  # não reaproveitar o cookie que está sendo apagado
                 agendar_cookie_login(None)  # esquece o login lembrado neste navegador
                 st.query_params.clear()
                 st.rerun()

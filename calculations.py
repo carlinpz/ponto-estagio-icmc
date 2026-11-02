@@ -3,6 +3,7 @@ Módulo de Cálculos e Regras de Negócio para Ponto Eletrônico de Estágio.
 Contém funções para processamento de horas, saldos, formatações e validações.
 """
 
+from html import escape
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Dict, Any, Tuple, Optional, List
 import pandas as pd
@@ -469,8 +470,9 @@ def generate_fusp_timesheet_html(
     import os
 
     inicio, fim, datas = get_fusp_period_dates(ano, mes)
-    nome_estagiario = config.get("nome_estagiario", "Estagiário(a)")
-    empresa_setor = config.get("empresa_setor", "ICMC / USP")
+    # Textos vindos de configuração/usuário sempre escapados antes de entrar no HTML
+    nome_estagiario = escape(str(config.get("nome_estagiario", "Estagiário(a)")))
+    empresa_setor = escape(str(config.get("empresa_setor", "ICMC / USP")))
 
     # Logo oficial da FUSP (usa arquivo local se existir para funcionar 100% offline, senão fallback web)
     logo_src = "http://demonstrativo.fusp.org.br/img/fusp_topo.jpg"
@@ -505,11 +507,11 @@ def generate_fusp_timesheet_html(
         reg = mapa_registros.get(d_str)
 
         if reg:
-            ent = (reg.get("entrada") or "")[:5]
-            ini_p = (reg.get("inicio_pausa") or "")[:5]
-            fim_p = (reg.get("fim_pausa") or "")[:5]
-            sai = (reg.get("saida") or "")[:5]
-            obs = limpar_observacao_boletim(reg.get("observacao"))
+            ent = escape((reg.get("entrada") or "")[:5])
+            ini_p = escape((reg.get("inicio_pausa") or "")[:5])
+            fim_p = escape((reg.get("fim_pausa") or "")[:5])
+            sai = escape((reg.get("saida") or "")[:5])
+            obs = escape(limpar_observacao_boletim(reg.get("observacao")))
         else:
             ent = ""
             ini_p = ""

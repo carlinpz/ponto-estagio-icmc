@@ -4,7 +4,7 @@ Contém dashboard de métricas, gráficos Plotly refinados, registro rápido e p
 """
 
 from datetime import datetime, date, time
-import hashlib
+import html
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import pandas as pd
@@ -24,22 +24,12 @@ from calculations import (
     today_br,
 )
 from theme import ICMC_COLORS, get_knot_svg_html, render_html
+from storage import _get_secret_or_default
+import auth
 
 
-def compute_auth_token(usuario: str, senha: str) -> str:
-    """Gera token de sessão verificável com salt para manter o login ativo após atualizar a página."""
-    try:
-        salt = st.secrets.get("auth_salt", "icmc_usp_fusp_605001_salt")
-        if not isinstance(salt, str) or not salt:
-            salt = "icmc_usp_fusp_605001_salt"
-    except Exception:
-        salt = "icmc_usp_fusp_605001_salt"
-    raw = f"icmc_auth:{salt}:{usuario.strip().lower()}:{senha.strip()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
-
-
-# Cookie "Lembrar login": guarda o token no navegador para não pedir usuário/senha a cada acesso.
-# Como o token é derivado do usuário + senha, trocar a senha invalida automaticamente o cookie.
+# Cookie "Lembrar login": guarda um token assinado e com validade (auth.py), nunca a senha.
+# Trocar o cookie_secret em secrets invalida todos os logins lembrados.
 AUTH_COOKIE_NAME = "ponto_icmc_auth"
 AUTH_COOKIE_DIAS = 30
 
@@ -50,6 +40,38 @@ def get_auth_cookie() -> Optional[str]:
         return st.context.cookies.get(AUTH_COOKIE_NAME)
     except Exception:
         return None
+
+
+def perfil_do_cookie() -> Optional[str]:
+    """Perfil ('estagiario' ou 'gestao') do login lembrado, se o token for válido e não tiver expirado."""
+    return auth.validar_token_login(get_auth_cookie(), _get_secret_or_default("cookie_secret"))
+
+
+def login_configurado(perfil: str) -> bool:
+    """Indica se o hash de senha do perfil está em secrets."""
+    chave = "senha_estagiario_hash" if perfil == "estagiario" else "senha_chefia_hash"
+    return bool(_get_secret_or_default(chave))
+
+
+def verificar_login(perfil: str, senha: str, usuario: str = "") -> bool:
+    """Confere usuário/senha do estagiário ou a senha da chefia contra os hashes em secrets."""
+    if perfil == "estagiario":
+        usuario_ok = usuario.strip().lower() == _get_secret_or_default("usuario_estagiario").lower()
+        return usuario_ok and auth.verificar_senha(senha, _get_secret_or_default("senha_estagiario_hash"))
+    if perfil == "gestao":
+        return auth.verificar_senha(senha, _get_secret_or_default("senha_chefia_hash"))
+    return False
+
+
+def iniciar_sessao(perfil: str, lembrar: bool):
+    """Marca a sessão como autenticada e agenda (ou remove) o cookie de login lembrado."""
+    st.session_state["perfil_ativo"] = perfil
+    st.session_state["autenticado_estagiario"] = perfil == "estagiario"
+    segredo = _get_secret_or_default("cookie_secret")
+    if lembrar and segredo:
+        agendar_cookie_login(auth.gerar_token_login(perfil, segredo, dias=AUTH_COOKIE_DIAS))
+    else:
+        agendar_cookie_login(None)
 
 
 def agendar_cookie_login(token: Optional[str]):
@@ -69,52 +91,33 @@ def agendar_cookie_login(token: Optional[str]):
 
 def sync_auth_cookie():
     """
-    Sincroniza a sessão com o localStorage e os cookies do navegador.
-    - Quando logado (acao='set'): salva token em localStorage e cookie de 30 dias.
-    - Quando deslogado (acao='clear'): limpa localStorage e cookie.
-    - Quando na tela de login sem token na URL: se existir token salvo no navegador, redireciona automaticamente.
+    Grava (acao='set') ou apaga (acao='clear') o cookie de login no navegador.
+    O token só existe no cookie: nunca na URL nem no HTML da tela de login.
     """
     acao = st.session_state.pop("_cookie_acao", None)
     valor = st.session_state.pop("_cookie_valor", "") if acao == "set" else ""
+    if acao not in ("set", "clear"):
+        return
 
     import streamlit.components.v1 as st_components
 
-    if acao == "set":
-        validade = f"max-age={AUTH_COOKIE_DIAS * 24 * 3600}"
-        st_components.html(
-            f"""
-            <script>
-            (function () {{
-                try {{
-                    var win = window.parent || window;
-                    var doc = win.document;
-                    var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
-                    doc.cookie = '{AUTH_COOKIE_NAME}={valor}; path=/; {validade}; SameSite=Lax' + seguro;
-                    win.localStorage.setItem('{AUTH_COOKIE_NAME}', '{valor}');
-                }} catch (e) {{}}
-            }})();
-            </script>
-            """,
-            height=0,
-        )
-    elif acao == "clear":
-        st.session_state["_acabou_de_sair"] = True
-        st_components.html(
-            f"""
-            <script>
-            (function () {{
-                try {{
-                    var win = window.parent || window;
-                    var doc = win.document;
-                    var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
-                    doc.cookie = '{AUTH_COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax' + seguro;
-                    win.localStorage.removeItem('{AUTH_COOKIE_NAME}');
-                }} catch (e) {{}}
-            }})();
-            </script>
-            """,
-            height=0,
-        )
+    validade = f"max-age={AUTH_COOKIE_DIAS * 24 * 3600}" if acao == "set" else "max-age=0"
+    st_components.html(
+        f"""
+        <script>
+        (function () {{
+            try {{
+                var win = window.parent || window;
+                var doc = win.document;
+                var seguro = (doc.location && doc.location.protocol === 'https:') ? '; Secure' : '';
+                doc.cookie = '{AUTH_COOKIE_NAME}={valor}; path=/; {validade}; SameSite=Lax' + seguro;
+                win.localStorage.removeItem('{AUTH_COOKIE_NAME}');
+            }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
@@ -481,9 +484,9 @@ def render_manager_screen(
         f"""
         <div class="metal-card" style="margin-bottom: 24px;">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; font-size: 0.85rem;">
-                <div><span style="color: {ICMC_COLORS['text_muted']};">ESTAGIÁRIO(A)</span><br><strong style="font-size: 0.95rem;">{nome_estagiario}</strong></div>
-                <div><span style="color: {ICMC_COLORS['text_muted']};">SUPERVISOR(A)</span><br><strong style="font-size: 0.95rem;">{nome_supervisor}</strong></div>
-                <div><span style="color: {ICMC_COLORS['text_muted']};">DEPARTAMENTO / SETOR</span><br><strong style="font-size: 0.95rem;">{empresa}</strong></div>
+                <div><span style="color: {ICMC_COLORS['text_muted']};">ESTAGIÁRIO(A)</span><br><strong style="font-size: 0.95rem;">{html.escape(str(nome_estagiario))}</strong></div>
+                <div><span style="color: {ICMC_COLORS['text_muted']};">SUPERVISOR(A)</span><br><strong style="font-size: 0.95rem;">{html.escape(str(nome_supervisor))}</strong></div>
+                <div><span style="color: {ICMC_COLORS['text_muted']};">DEPARTAMENTO / SETOR</span><br><strong style="font-size: 0.95rem;">{html.escape(str(empresa))}</strong></div>
                 <div><span style="color: {ICMC_COLORS['text_muted']};">CARGA CONTRATUAL</span><br><strong style="font-size: 0.95rem;">{carga:g}h / dia (30h semanais)</strong></div>
                 <div><span style="color: {ICMC_COLORS['text_muted']};">PERÍODO DE APURAÇÃO</span><br><strong style="font-size: 0.95rem;">{periodo_exibicao}</strong></div>
             </div>
@@ -669,16 +672,14 @@ def render_manager_screen(
         st_components.html(fusp_html, height=680, scrolling=True)
 
 
-def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
+def render_welcome_screen():
     """
-    Exibe a tela inicial de seleção de perfil fixa (sem scroll).
-    - Chefia: acesso direto com um clique, sem senha (read-only).
-    - Estagiário: acesso autenticado por Usuário e Senha, com opção de lembrar login e alterar credenciais.
+    Exibe a tela inicial de seleção de perfil.
+    - Estagiário: usuário + senha (hash em secrets), com opção de lembrar login.
+    - Chefia: senha própria (hash em secrets), acesso somente leitura.
+    Nenhum token ou senha é enviado no HTML desta tela.
     """
     knot_svg = get_knot_svg_html(size=36)
-    usuario_cadastrado = str(config.get("usuario_estagiario", "")).strip() or "carlos"
-    pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
-    expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
 
     # CSS moderno com abas, centralizado e com scroll livre e responsivo em qualquer tela
     render_html(
@@ -790,31 +791,6 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
         """
     )
 
-    # Auto-login via localStorage caso o navegador tenha salvo o token anteriormente (e não acabou de sair)
-    if not st.session_state.pop("_acabou_de_sair", False):
-        import streamlit.components.v1 as st_components
-        st_components.html(
-            f"""
-            <script>
-            (function () {{
-                try {{
-                    var win = window.parent || window;
-                    var saved = win.localStorage.getItem('{AUTH_COOKIE_NAME}');
-                    if (saved && saved === '{expected_token}') {{
-                        var url = new URL(win.location.href);
-                        if (url.searchParams.get('token') !== saved) {{
-                            url.searchParams.set('acesso', 'estagiario');
-                            url.searchParams.set('token', saved);
-                            win.location.replace(url.toString());
-                        }}
-                    }}
-                }} catch (e) {{}}
-            }})();
-            </script>
-            """,
-            height=0,
-        )
-
     render_html(
         f"""
         <div style="text-align: center; margin: 4px auto 14px auto; max-width: 680px;">
@@ -850,11 +826,14 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                     Área diária para registrar entrada, intervalos e saída com relógio em tempo real, visualização de saldos e ajustes.
                 </p>
                 <div style="margin: 4px 0 0 0; padding: 4px 8px; background: rgba(245, 158, 11, 0.08); border-radius: 6px; font-size: 0.7rem; color: {ICMC_COLORS['copper_amber']};">
-                    Acesso com usuário e senha sincronizados na nuvem.
+                    Acesso com usuário e senha pessoais.
                 </div>
             </div>
             """
         )
+
+        if not login_configurado("estagiario"):
+            st.warning("Login não configurado: defina usuario_estagiario e senha_estagiario_hash em secrets.")
 
         with st.form("form_login_estag"):
             col_u, col_p = st.columns(2)
@@ -869,49 +848,13 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
             )
             btn_estag = st.form_submit_button("ENTRAR NO MEU PONTO", use_container_width=True, type="primary")
             if btn_estag:
-                if (
-                    usuario_input.strip().lower() == usuario_cadastrado.lower()
-                    and pin_input.strip() == pin_cadastrado
-                ):
-                    token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
-                    st.session_state["perfil_ativo"] = "estagiario"
-                    st.session_state["autenticado_estagiario"] = True
-                    st.query_params["acesso"] = "estagiario"
-                    st.query_params["token"] = token
-                    agendar_cookie_login(token if lembrar_input else None)
+                if verificar_login("estagiario", pin_input, usuario_input):
+                    iniciar_sessao("estagiario", lembrar_input)
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos. Verifique os dados e tente novamente.")
 
-        with st.popover("🔑 Alterar Usuário ou Senha de Acesso", use_container_width=True):
-            with st.form("form_change_credentials_welcome"):
-                st.caption("Informe a senha atual para definir um novo usuário e/ou nova senha.")
-                senha_atual_inp = st.text_input("Senha Atual:", type="password", placeholder="Digite a senha atual...")
-                novo_user_inp = st.text_input("Novo Usuário:", value=usuario_cadastrado, placeholder="Ex: carlos")
-                nova_senha_inp = st.text_input("Nova Senha:", type="password", placeholder="Digite a nova senha...")
-                confirma_senha_inp = st.text_input("Confirmar Nova Senha:", type="password", placeholder="Confirme a nova senha...")
-                btn_salvar_cred = st.form_submit_button("SALVAR NOVO USUÁRIO / SENHA", use_container_width=True)
-                if btn_salvar_cred:
-                    if senha_atual_inp.strip() != pin_cadastrado:
-                        st.error("A senha atual informada está incorreta.")
-                    elif not novo_user_inp.strip():
-                        st.error("O nome de usuário não pode ficar em branco.")
-                    elif not nova_senha_inp.strip():
-                        st.error("A nova senha não pode ficar em branco.")
-                    elif nova_senha_inp.strip() != confirma_senha_inp.strip():
-                        st.error("A nova senha e a confirmação não coincidem.")
-                    else:
-                        config["usuario_estagiario"] = novo_user_inp.strip()
-                        config["pin_estagiario"] = nova_senha_inp.strip()
-                        if on_save_config:
-                            on_save_config(config)
-                        st.session_state["perfil_ativo"] = "estagiario"
-                        st.session_state["autenticado_estagiario"] = True
-                        st.query_params["acesso"] = "estagiario"
-                        st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
-                        agendar_cookie_login(st.query_params["token"])
-                        st.success("Credenciais atualizadas e sincronizadas na nuvem com sucesso!")
-                        st.rerun()
+        st.caption("Para trocar a senha: rode `python gerar_hash_senha.py` e atualize `senha_estagiario_hash` em secrets.")
 
     with tab_gestor:
         render_html(
@@ -927,15 +870,17 @@ def render_welcome_screen(config: Dict[str, Any], on_save_config=None):
                     Painel consolidado com indicadores de assiduidade, cumprimento da carga contratual, banco de horas e espelho de ponto oficial para assinatura.
                 </p>
                 <div style="margin: 4px 0 0 0; padding: 4px 8px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; font-size: 0.7rem; color: {ICMC_COLORS['steel_blue']};">
-                    Modo Somente Leitura (Sem risco de alterações acidentais)
+                    Modo Somente Leitura • acesso com senha da supervisão
                 </div>
             </div>
             """
         )
-        if st.button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True, key="btn_login_gestor"):
-            st.session_state["perfil_ativo"] = "gestao"
-            st.query_params["acesso"] = "gestao"
-            if "token" in st.query_params:
-                del st.query_params["token"]
-            st.rerun()
-
+        with st.form("form_login_chefia"):
+            senha_chefia = st.text_input("Senha da chefia:", type="password", placeholder="Senha de acesso da supervisão...")
+            lembrar_chefia = st.checkbox(f"Lembrar neste navegador ({AUTH_COOKIE_DIAS} dias)", value=True)
+            if st.form_submit_button("ACESSAR COMO SUPERVISOR(A)", use_container_width=True):
+                if verificar_login("gestao", senha_chefia):
+                    iniciar_sessao("gestao", lembrar_chefia)
+                    st.rerun()
+                else:
+                    st.error("Senha da chefia incorreta.")

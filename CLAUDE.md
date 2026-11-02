@@ -15,7 +15,11 @@ Leia esse arquivo no início de qualquer tarefa não trivial.
 - `app.py` — fluxo principal Streamlit, autenticação, sidebar e abas.
 - `calculations.py` — regras de jornada, saldo, conformidade (Lei 11.788/2008), HTML do boletim FUSP.
 - `components.py` — cards, gráficos Plotly, painel da chefia, tela de login, cookies.
-- `storage.py` — JSON local (`ponto_eletronico.json`) + sincronização com Google Sheets via Apps Script.
+- `storage.py` — cache JSON local (`ponto_eletronico.json`, só registros) + sincronização POR REGISTRO
+  com Google Sheets via Apps Script (gravar/excluir uma data, síncrono, erro visível, pendências com reenvio).
+- `apps_script/Code.gs` — código do Web App (colado manualmente no editor do Apps Script; segredo em
+  Propriedades do script, nunca no código). Protocolo versionado: o app só faz POST se o GET devolver `versao: 2`.
+- `auth.py` — hash de senha (PBKDF2) e token de login assinado com validade; `gerar_hash_senha.py` gera hashes.
 - `theme.py` — CSS, logo SVG, relógio em JS.
 - `launcher.pyw` / `iniciar_ponto.bat` — inicia o app no Windows sem janela de terminal.
 - Dados de verdade ficam na planilha Google "Ponto Eletrônico - Carlos" (aba Registros).

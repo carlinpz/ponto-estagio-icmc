@@ -1,14 +1,16 @@
 """
 Módulo de Persistência e Gerenciamento de Dados do Ponto Eletrônico.
-Salva e carrega dados em JSON local (ponto_eletronico.json), com suporte a exportação CSV.
+
+- Fonte da verdade: planilha Google, acessada pelo Web App do Apps Script (`apps_script/Code.gs`).
+- Cada alteração envia SÓ o(s) registro(s) alterado(s) (gravar/excluir por data), de forma síncrona:
+  se a planilha não confirmar, o erro sobe para a interface (nada de falha silenciosa).
+- `ponto_eletronico.json` é só um cache local dos registros (sem configurações nem credenciais).
+- Configurações pessoais (nomes, setor) vêm de st.secrets, seção [perfil].
 """
 
-import copy
 import json
 import os
-import threading
-from datetime import datetime, date, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "ponto_eletronico.json")
@@ -22,15 +24,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "Quinta-feira",
         "Sexta-feira",
     ],
-    "nome_estagiario": "Carlos Henrique da Luz Pizzi",
-    "nome_supervisor": "Maria Fernanda Marreta",
-    "empresa_setor": "605001",
-    "usuario_estagiario": "carlos",
-    "pin_estagiario": "1122",
+    "nome_estagiario": "Estagiário(a)",
+    "nome_supervisor": "Supervisor(a)",
+    "empresa_setor": "",
 }
 
-DEFAULT_SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1-1XDAVUDdAGK-OUfCog8bDizN8Ax-oeHfl81rHlxfmI/export?format=csv"
-DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyq1Mkm5VjbTd-A48DyCkNBnWmzRbC4fsVjqFuumBHLep7JNaqGA33jHJUjAz023jO8xA/exec"
+CAMPOS_REGISTRO = ("data", "entrada", "inicio_pausa", "fim_pausa", "saida", "meta_dia", "observacao")
+
+
+class CloudSyncError(Exception):
+    """Falha ao ler ou gravar na planilha (rede, segredo errado, Apps Script desatualizado...)."""
 
 
 def _deduplicate_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -46,42 +49,11 @@ def _deduplicate_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
-def _merge_configs(base: Dict[str, Any], override: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Mescla configurações preservando credenciais e dados cadastrais válidos,
-    impedindo que strings vazias ou placeholders genéricos apaguem a senha/usuário salvos.
-    """
-    result = DEFAULT_CONFIG.copy()
-    if isinstance(base, dict):
-        for k, v in base.items():
-            if v is not None and str(v).strip() != "":
-                if k == "nome_estagiario" and str(v).strip() == "Estagiário(a)" and result.get(k) != "Estagiário(a)":
-                    continue
-                if k == "nome_supervisor" and str(v).strip() == "Gestor(a) / Supervisor(a)" and result.get(k) != "Gestor(a) / Supervisor(a)":
-                    continue
-                if k == "empresa_setor" and str(v).strip() == "ICMC / USP" and result.get(k) == "605001":
-                    continue
-                result[k] = v
-
-    if isinstance(override, dict):
-        for k, v in override.items():
-            if v is not None and str(v).strip() != "":
-                if k == "nome_estagiario" and str(v).strip() == "Estagiário(a)" and result.get(k) != "Estagiário(a)":
-                    continue
-                if k == "nome_supervisor" and str(v).strip() == "Gestor(a) / Supervisor(a)" and result.get(k) != "Gestor(a) / Supervisor(a)":
-                    continue
-                if k == "empresa_setor" and str(v).strip() == "ICMC / USP" and result.get(k) == "605001":
-                    continue
-                result[k] = v
-
-    return result
-
-
 def _parse_meta_dia(v: Any, obs: str = "", default: float = 6.0) -> float:
     """Converte meta_dia preservando 0.0 em feriados/abonos."""
     if v is not None and str(v).strip() != "":
         try:
-            return float(v)
+            return float(str(v).replace(",", "."))
         except ValueError:
             pass
     if any(k in str(obs).lower() for k in ("feriado", "recesso", "dispensa", "abono", "folga")):
@@ -89,7 +61,7 @@ def _parse_meta_dia(v: Any, obs: str = "", default: float = 6.0) -> float:
     return default
 
 
-def _get_secret_or_default(key: str, default_val: str) -> str:
+def _get_secret_or_default(key: str, default_val: str = "") -> str:
     """Obtém uma chave de st.secrets ou variáveis de ambiente (os.environ) com fallback para o valor padrão."""
     env_val = os.environ.get(key) or os.environ.get(key.upper())
     if env_val and str(env_val).strip():
@@ -102,11 +74,24 @@ def _get_secret_or_default(key: str, default_val: str) -> str:
         return default_val
 
 
+def load_config() -> Dict[str, Any]:
+    """Configuração do app: padrões do contrato + dados pessoais da seção [perfil] de st.secrets."""
+    config = json.loads(json.dumps(DEFAULT_CONFIG))
+    try:
+        import streamlit as st
+        perfil = st.secrets.get("perfil", {})
+        for k in DEFAULT_CONFIG:
+            if k in perfil and perfil[k] not in (None, ""):
+                config[k] = list(perfil[k]) if k == "dias_uteis" else perfil[k]
+    except Exception:
+        pass
+    config["carga_horaria_diaria"] = float(config["carga_horaria_diaria"])
+    return config
+
+
 def is_cloud_configured() -> bool:
-    """Verifica se o Google Sheets está configurado via Apps Script ou URL da planilha."""
-    apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
-    sheet_url = _get_secret_or_default("spreadsheet_url", DEFAULT_SPREADSHEET_CSV_URL)
-    return bool(apps_url or sheet_url)
+    """A planilha só é usada quando a URL do Apps Script E o segredo compartilhado estão em secrets."""
+    return bool(_get_secret_or_default("apps_script_url") and _get_secret_or_default("apps_script_secret"))
 
 
 def _clean_cloud_time(v: Optional[str]) -> Optional[str]:
@@ -117,12 +102,9 @@ def _clean_cloud_time(v: Optional[str]) -> Optional[str]:
     if not v_str or v_str.lower() in ("none", "null", ""):
         return None
     import re
-    m = re.search(r"(\d{2}:\d{2}:\d{2})", v_str)
+    m = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", v_str)
     if m:
-        return m.group(1)
-    m2 = re.search(r"(\d{2}:\d{2})", v_str)
-    if m2:
-        return m2.group(1) + ":00"
+        return f"{int(m.group(1)):02d}:{m.group(2)}:{m.group(3) or '00'}"
     return v_str
 
 
@@ -149,252 +131,188 @@ def _clean_cloud_date(v: Optional[str]) -> Optional[str]:
     return None
 
 
-def load_database_from_sheet_csv(sheet_url: str = DEFAULT_SPREADSHEET_CSV_URL) -> Dict[str, Any]:
-    """Lê registros e configurações diretamente da exportação CSV da planilha do Google Docs (<0.5s)."""
-    import urllib.request
-    import csv
-    import io
-    import re
-    import time
-
-    csv_url = sheet_url
-    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
-    if m:
-        sheet_id = m.group(1)
-        # Cache-buster para garantir leitura em tempo real sem cache antigo do CDN
-        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&t={int(time.time())}"
-
-    req = urllib.request.Request(
-        csv_url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        text = resp.read().decode("utf-8")
-
-    reader = csv.DictReader(io.StringIO(text))
-    records = []
-    cloud_cfg: Dict[str, Any] = {}
-
-    for r in reader:
-        raw_d = str(r.get("data", "")).strip()
-        if raw_d in ("CONFIG_JSON", "__CONFIG__"):
-            obs_cfg = str(r.get("observacao", "") or "").strip()
-            if obs_cfg:
-                try:
-                    parsed_cfg = json.loads(obs_cfg)
-                    if isinstance(parsed_cfg, dict):
-                        cloud_cfg.update(parsed_cfg)
-                except Exception:
-                    pass
-            continue
-
-        d_val = _clean_cloud_date(raw_d)
-        if not d_val or d_val == "CONFIG_JSON":
-            continue
-        obs_str = str(r.get("observacao", "") or "")
-        records.append({
-            "data": d_val,
-            "entrada": _clean_cloud_time(r.get("entrada")),
-            "inicio_pausa": _clean_cloud_time(r.get("inicio_pausa")),
-            "fim_pausa": _clean_cloud_time(r.get("fim_pausa")),
-            "saida": _clean_cloud_time(r.get("saida")),
-            "meta_dia": _parse_meta_dia(r.get("meta_dia"), obs_str, 6.0),
-            "observacao": obs_str,
-        })
-
-    return {"config": cloud_cfg, "registros": _deduplicate_records(records)}
-
-
-def load_database_from_apps_script(url: str) -> Dict[str, Any]:
-    """Lê registros e configurações via Web App do Google Apps Script com normalização."""
-    import requests
-    resp = requests.get(url, timeout=20)
-    if resp.status_code == 200:
-        data = resp.json()
-        raw_records = []
-        cloud_cfg: Dict[str, Any] = {}
-        if isinstance(data, list):
-            raw_records = data
-        elif isinstance(data, dict):
-            raw_records = data.get("registros", [])
-            if isinstance(data.get("config"), dict):
-                cloud_cfg.update(data.get("config", {}))
-
-        cleaned_records = []
-        for r in raw_records:
-            raw_d = str(r.get("data", "")).strip()
-            if raw_d in ("CONFIG_JSON", "__CONFIG__"):
-                obs_cfg = str(r.get("observacao", "") or "").strip()
-                if obs_cfg:
-                    try:
-                        parsed_cfg = json.loads(obs_cfg)
-                        if isinstance(parsed_cfg, dict):
-                            cloud_cfg.update(parsed_cfg)
-                    except Exception:
-                        pass
-                continue
-
-            d_val = _clean_cloud_date(raw_d)
-            if not d_val or d_val == "CONFIG_JSON":
-                continue
-            obs_str = str(r.get("observacao", "") or "")
-            cleaned_records.append({
-                "data": d_val,
-                "entrada": _clean_cloud_time(r.get("entrada")),
-                "inicio_pausa": _clean_cloud_time(r.get("inicio_pausa")),
-                "fim_pausa": _clean_cloud_time(r.get("fim_pausa")),
-                "saida": _clean_cloud_time(r.get("saida")),
-                "meta_dia": _parse_meta_dia(r.get("meta_dia"), obs_str, 6.0),
-                "observacao": obs_str,
-            })
-
-        return {"config": cloud_cfg, "registros": _deduplicate_records(cleaned_records)}
-    raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
-
-
-def save_database_to_apps_script(url: str, data: Dict[str, Any]):
-    """Envia registros e configurações (em linha metadado CONFIG_JSON) para a planilha via Apps Script."""
-    import requests
-    clean_regs = _deduplicate_records(data.get("registros", []))
-    cfg_row = {
-        "data": "CONFIG_JSON",
-        "entrada": "",
-        "inicio_pausa": "",
-        "fim_pausa": "",
-        "saida": "",
-        "meta_dia": 0,
-        "observacao": json.dumps(data.get("config", {}), ensure_ascii=False),
+def _normalizar_registro(r: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Converte um registro vindo da planilha para o formato interno; ignora linhas inválidas e CONFIG_JSON."""
+    d_val = _clean_cloud_date(str(r.get("data", "")).strip())
+    if not d_val or d_val == "CONFIG_JSON":
+        return None
+    obs_str = str(r.get("observacao", "") or "")
+    return {
+        "data": d_val,
+        "entrada": _clean_cloud_time(r.get("entrada")),
+        "inicio_pausa": _clean_cloud_time(r.get("inicio_pausa")),
+        "fim_pausa": _clean_cloud_time(r.get("fim_pausa")),
+        "saida": _clean_cloud_time(r.get("saida")),
+        "meta_dia": _parse_meta_dia(r.get("meta_dia"), obs_str, 6.0),
+        "observacao": obs_str,
     }
-    payload = {
-        "config": data.get("config", {}),
-        "registros": clean_regs + [cfg_row],
-    }
-    resp = requests.post(url, json=payload, timeout=35)
-    if resp.status_code not in (200, 201):
-        raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
 
 
-def load_database(filepath: str = DEFAULT_DATA_PATH) -> Dict[str, Any]:
+VERSAO_PROTOCOLO = 2
+_urls_confirmadas: set = set()
+
+
+def _confirmar_versao_apps_script(url: str) -> None:
     """
-    Carrega o banco de dados.
-    Lê com prioridade da planilha na nuvem (Google Sheets CSV rápido ou Apps Script)
-    e sincroniza o cache local, preservando sempre as configurações e credenciais.
-    Em caso de offline, usa o arquivo local.
+    Antes do primeiro POST, confere (por GET, que não altera nada) se o Apps Script é a versão nova.
+    O script antigo trata qualquer POST como "substituir a planilha inteira": mandar
+    {"acao": "listar"} para ele poderia apagar todos os registros.
     """
-    # Carrega estado local primeiro para preservar configurações e comparar registros
-    local_cfg = DEFAULT_CONFIG.copy()
-    local_records = []
+    import requests
+
+    if url in _urls_confirmadas:
+        return
+    try:
+        dados = requests.get(url, timeout=30).json()
+    except (requests.RequestException, ValueError) as e:
+        raise CloudSyncError(f"Não foi possível conferir a versão do Apps Script ({type(e).__name__}).") from e
+    if not isinstance(dados, dict) or dados.get("versao") != VERSAO_PROTOCOLO:
+        raise CloudSyncError("O Apps Script publicado é a versão antiga. Atualize-o com apps_script/Code.gs.")
+    _urls_confirmadas.add(url)
+
+
+def _chamar_apps_script(acao: str, **campos: Any) -> Dict[str, Any]:
+    """
+    Faz UMA chamada ao Web App do Apps Script e devolve a resposta já validada.
+    Toda chamada leva o segredo compartilhado no corpo (nunca na URL).
+    Qualquer resposta que não seja {"ok": true, ...} vira CloudSyncError.
+    """
+    import requests
+
+    url = _get_secret_or_default("apps_script_url")
+    segredo = _get_secret_or_default("apps_script_secret")
+    if not url or not segredo:
+        raise CloudSyncError("Planilha não configurada (faltam apps_script_url / apps_script_secret em secrets).")
+
+    _confirmar_versao_apps_script(url)
+    try:
+        resp = requests.post(url, json={"segredo": segredo, "acao": acao, **campos}, timeout=30)
+    except requests.RequestException as e:
+        raise CloudSyncError(f"Sem conexão com a planilha ({type(e).__name__}).") from e
+
+    if resp.status_code != 200:
+        raise CloudSyncError(f"A planilha respondeu HTTP {resp.status_code}.")
+    try:
+        dados = resp.json()
+    except ValueError:
+        raise CloudSyncError("Resposta inesperada da planilha (o Apps Script está na versão nova?).")
+    if not isinstance(dados, dict) or dados.get("ok") is not True:
+        erro = dados.get("erro") if isinstance(dados, dict) else None
+        raise CloudSyncError(f"A planilha recusou a operação: {erro or 'resposta sem ok=true'}.")
+    return dados
+
+
+def load_records_from_cloud() -> List[Dict[str, Any]]:
+    """Lê todos os registros da planilha (sem a linha CONFIG_JSON)."""
+    dados = _chamar_apps_script("listar")
+    brutos = dados.get("registros", [])
+    if not isinstance(brutos, list):
+        raise CloudSyncError("Resposta da planilha sem lista de registros.")
+    normalizados = [r for r in (_normalizar_registro(x) for x in brutos if isinstance(x, dict)) if r]
+    return _deduplicate_records(normalizados)
+
+
+def _registro_para_envio(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Mantém só as colunas da planilha, com valores simples (texto ou número)."""
+    envio = {k: r.get(k) for k in CAMPOS_REGISTRO}
+    for k in ("entrada", "inicio_pausa", "fim_pausa", "saida", "observacao"):
+        envio[k] = "" if envio[k] is None else str(envio[k])
+    envio["meta_dia"] = float(envio["meta_dia"]) if envio["meta_dia"] not in (None, "") else 6.0
+    return envio
+
+
+def sync_upsert_records(registros: List[Dict[str, Any]]) -> None:
+    """Grava (insere ou atualiza) SÓ estes registros na planilha, um por data. Levanta CloudSyncError se falhar."""
+    if not registros:
+        return
+    _chamar_apps_script("gravar", registros=[_registro_para_envio(r) for r in registros])
+
+
+def sync_delete_record(data_str: str) -> None:
+    """Exclui da planilha SÓ a linha desta data. Levanta CloudSyncError se falhar."""
+    _chamar_apps_script("excluir", data=data_str)
+
+
+def enviar_pendentes(pendentes: Dict[str, Optional[Dict[str, Any]]]) -> Tuple[Dict[str, Optional[Dict[str, Any]]], Optional[str]]:
+    """
+    Envia à planilha as alterações pendentes desta sessão.
+    `pendentes` mapeia data -> registro a gravar, ou None para excluir aquela data.
+    Retorna (o que continua pendente, mensagem de erro ou None).
+    Reenviar é seguro: gravar/excluir a mesma data duas vezes dá o mesmo resultado.
+    """
+    if not pendentes or not is_cloud_configured():
+        return {}, None
+    try:
+        sync_upsert_records([r for r in pendentes.values() if r is not None])
+        for data_str, r in pendentes.items():
+            if r is None:
+                sync_delete_record(data_str)
+    except CloudSyncError as e:
+        return dict(pendentes), str(e)
+    return {}, None
+
+
+def aplicar_pendentes(
+    registros: List[Dict[str, Any]], pendentes: Dict[str, Optional[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """Reaplica sobre os registros (recém-lidos da planilha) as alterações que ainda não foram enviadas."""
+    for data_str, r in (pendentes or {}).items():
+        registros = delete_record_by_date(registros, data_str) if r is None else upsert_record(registros, r)
+    return registros
+
+
+def load_database(filepath: str = DEFAULT_DATA_PATH, avisos: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Carrega o banco de dados: registros da planilha (se configurada) e configuração de st.secrets.
+    Se a planilha falhar, usa o cache local e acrescenta o motivo em `avisos`.
+    """
+    local_records: List[Dict[str, Any]] = []
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                if isinstance(d, dict):
-                    local_records = _deduplicate_records(d.get("registros", []))
-                    if "config" in d and isinstance(d["config"], dict):
-                        local_cfg = _merge_configs(local_cfg, d["config"])
+            if isinstance(d, dict):
+                local_records = _deduplicate_records(d.get("registros", []))
         except Exception:
             pass
 
-    use_cloud = os.path.abspath(filepath) == os.path.abspath(DEFAULT_DATA_PATH)
-    cloud_data = None
+    config = load_config()
+    use_cloud = os.path.abspath(filepath) == os.path.abspath(DEFAULT_DATA_PATH) and is_cloud_configured()
 
     if use_cloud:
-        # 1. Tenta carregar instantaneamente do Google Sheets CSV (sub-segundo)
-        sheet_url = _get_secret_or_default("spreadsheet_url", DEFAULT_SPREADSHEET_CSV_URL)
-        if sheet_url:
-            try:
-                cloud_data = load_database_from_sheet_csv(sheet_url)
-            except Exception:
-                pass
+        try:
+            cloud_records = load_records_from_cloud()
+            if cloud_records or not local_records:
+                result_data = {"config": config, "registros": cloud_records}
+                save_database(result_data, filepath)
+                return result_data
+            if avisos is not None:
+                avisos.append("A planilha voltou vazia; exibindo a cópia local. Confira a planilha antes de lançar pontos.")
+        except CloudSyncError as e:
+            if avisos is not None:
+                avisos.append(f"Não foi possível ler a planilha: {e} Exibindo a cópia local, que pode estar desatualizada.")
 
-        # 2. Se não conseguiu pelo CSV, tenta pelo Apps Script
-        if not cloud_data or not cloud_data.get("registros"):
-            apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
-            if apps_url:
-                try:
-                    cloud_data = load_database_from_apps_script(apps_url)
-                except Exception:
-                    pass
-
-    # 3. Se temos dados da nuvem e eles são consistentes, mescla com configurações locais
-    if cloud_data and cloud_data.get("registros"):
-        cloud_records = _deduplicate_records(cloud_data.get("registros", []))
-        if len(cloud_records) > 0:
-            merged_cfg = _merge_configs(local_cfg, cloud_data.get("config", {}))
-            result_data = {
-                "config": merged_cfg,
-                "registros": cloud_records,
-            }
-            save_database(result_data, filepath, sync_cloud=False)
-            return result_data
-
-    # 4. Fallback para dados locais se disponíveis
-    if local_records or os.path.exists(filepath):
-        result_data = {
-            "config": local_cfg,
-            "registros": local_records,
-        }
-        return result_data
-
-    initial_data = {
-        "config": DEFAULT_CONFIG.copy(),
-        "registros": [],
-    }
-    save_database(initial_data, filepath, sync_cloud=False)
-    return initial_data
+    return {"config": config, "registros": local_records}
 
 
-def save_database(
-    data: Dict[str, Any],
-    filepath: str = DEFAULT_DATA_PATH,
-    sync_cloud: bool = True,
-    async_cloud: bool = True,
-) -> bool:
+def save_database(data: Dict[str, Any], filepath: str = DEFAULT_DATA_PATH) -> bool:
     """
-    Salva os dados de forma segura no JSON local e, se sync_cloud for True e a nuvem estiver ativa,
-    sincroniza com o Google Sheets (em thread de background quando async_cloud=True).
+    Salva SÓ os registros no cache local (JSON). Não envia nada à planilha:
+    o envio é feito por registro em sync_upsert_records / sync_delete_record.
     """
-    # Garante que CONFIG_JSON e duplicatas nunca fiquem na lista em memória/JSON local
     if "registros" in data and isinstance(data["registros"], list):
         data["registros"] = _deduplicate_records(data["registros"])
-    if "config" in data and isinstance(data["config"], dict):
-        data["config"] = _merge_configs(DEFAULT_CONFIG, data["config"])
 
-    saved_local = False
     try:
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         temp_path = filepath + ".tmp"
         with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        if os.path.exists(filepath):
-            os.replace(temp_path, filepath)
-        else:
-            os.rename(temp_path, filepath)
-        saved_local = True
+            json.dump({"registros": data.get("registros", [])}, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, filepath)
+        return True
     except Exception as e:
         print(f"Erro ao salvar localmente em {filepath}: {e}")
-
-    # Sincronização em nuvem se solicitada e habilitada
-    if sync_cloud and is_cloud_configured():
-        apps_url = _get_secret_or_default("apps_script_url", DEFAULT_APPS_SCRIPT_URL)
-        if apps_url:
-            payload_copy = copy.deepcopy(data)
-
-            def _worker():
-                try:
-                    save_database_to_apps_script(apps_url, payload_copy)
-                except Exception as e:
-                    print(f"Aviso: Erro ao sincronizar com Google Sheets: {e}")
-
-            if async_cloud:
-                threading.Thread(target=_worker, daemon=True).start()
-            else:
-                _worker()
-
-    return saved_local
+        return False
 
 
 def get_record_by_date(registros: List[Dict[str, Any]], data_str: str) -> Optional[Dict[str, Any]]:

@@ -153,42 +153,309 @@ def test_all():
     assert df_hol.iloc[0]["Meta (h)"] == 0.0
     print("✓ Teste 11 passou: Tratamento de feriado (meta 0.0) e filtro de CONFIG_JSON")
 
-    # Teste 12: Persistência de usuário e senha, geração de token com salt e cookie de "Lembrar login"
-    import sys
-    from unittest.mock import MagicMock
-    if "streamlit" not in sys.modules:
-        try:
-            import streamlit as st
-        except ImportError:
-            st = MagicMock()
-            st.session_state = {}
-            sys.modules["streamlit"] = st
-    else:
-        st = sys.modules["streamlit"]
-    if "plotly" not in sys.modules:
-        try:
-            import plotly
-        except ImportError:
-            sys.modules["plotly"] = MagicMock()
-            sys.modules["plotly.graph_objects"] = MagicMock()
-    from components import compute_auth_token, agendar_cookie_login
-    from storage import _merge_configs, DEFAULT_CONFIG
-    merged = _merge_configs(DEFAULT_CONFIG, {"usuario_estagiario": "", "pin_estagiario": ""})
-    assert merged["usuario_estagiario"] == "carlos"
-    assert merged["pin_estagiario"] == "1122"
-    tok = compute_auth_token("carlos", "1122")
-    assert len(tok) == 24
-    assert tok == compute_auth_token("CARLOS ", " 1122 ")
-    agendar_cookie_login(tok)
-    assert st.session_state.get("_cookie_acao") == "set"
-    assert st.session_state.get("_cookie_valor") == tok
-    assert st.session_state.get("login_lembrado") is True
-    agendar_cookie_login(None)
-    assert st.session_state.get("_cookie_acao") == "clear"
-    assert st.session_state.get("login_lembrado") is False
-    print("✓ Teste 12 passou: Autenticação por usuário/senha com salt (24 hex), cookie lembrar login e proteção de credenciais")
-
     print("TODOS OS TESTES PASSARAM COM SUCESSO! 🎉")
+
+
+# ---------------------------------------------------------------------------
+# Sincronização por registro com a planilha (rede simulada: nenhum teste acessa a internet)
+# ---------------------------------------------------------------------------
+import json
+import os
+import re
+from pathlib import Path
+
+import pytest
+import requests
+
+import storage
+import auth
+
+REG_02_10 = {
+    "data": "2026-10-02", "entrada": "08:15:00", "inicio_pausa": "12:40:00",
+    "fim_pausa": "13:40:00", "saida": "15:15:00", "meta_dia": 6.0, "observacao": "Ajuste manual",
+}
+
+
+class FakeResposta:
+    def __init__(self, corpo=None, status=200, texto=None):
+        self.status_code = status
+        self._corpo = corpo
+        self.text = texto if texto is not None else json.dumps(corpo)
+
+    def json(self):
+        if self._corpo is None:
+            raise ValueError("não é JSON")
+        return self._corpo
+
+
+@pytest.fixture
+def planilha(monkeypatch):
+    """Configura a nuvem via variáveis de ambiente e intercepta requests.post, guardando cada chamada."""
+    monkeypatch.setenv("APPS_SCRIPT_URL", "https://exemplo.invalid/exec")
+    monkeypatch.setenv("APPS_SCRIPT_SECRET", "segredo-de-teste")
+    # Não deixa o teste ler o secrets.toml real (o Streamlit guardaria em memória para os testes seguintes)
+    monkeypatch.setattr(storage, "load_config", lambda: json.loads(json.dumps(storage.DEFAULT_CONFIG)))
+    monkeypatch.setattr(storage, "_urls_confirmadas", set())
+    estado = {
+        "chamadas": [],
+        "resposta": FakeResposta({"ok": True}),
+        "versao": FakeResposta({"ok": False, "erro": "Use POST com o segredo.", "versao": 2}),
+    }
+
+    def fake_post(url, json=None, timeout=None):
+        estado["chamadas"].append({"url": url, "corpo": json})
+        r = estado["resposta"]
+        if isinstance(r, Exception):
+            raise r
+        return r(json) if callable(r) else r
+
+    def fake_get(url, timeout=None):
+        return estado["versao"]
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+    return estado
+
+
+def test_apps_script_antigo_nunca_recebe_post(planilha):
+    """O script antigo sobrescreve a planilha inteira em qualquer POST: o app não pode nem tentar."""
+    planilha["versao"] = FakeResposta([{"data": "2026-10-01"}])  # GET do script antigo devolve a lista crua
+    with pytest.raises(storage.CloudSyncError, match="versão antiga"):
+        storage.load_records_from_cloud()
+    with pytest.raises(storage.CloudSyncError):
+        storage.sync_upsert_records([REG_02_10])
+    assert planilha["chamadas"] == []
+
+
+def test_gravar_envia_so_o_registro_alterado_com_segredo(planilha):
+    storage.sync_upsert_records([REG_02_10])
+    assert len(planilha["chamadas"]) == 1
+    chamada = planilha["chamadas"][0]
+    assert chamada["corpo"]["acao"] == "gravar"
+    assert chamada["corpo"]["segredo"] == "segredo-de-teste"
+    assert "segredo" not in chamada["url"]
+    assert [r["data"] for r in chamada["corpo"]["registros"]] == ["2026-10-02"]
+    assert set(chamada["corpo"]["registros"][0]) == set(storage.CAMPOS_REGISTRO)
+
+
+def test_excluir_envia_so_a_data(planilha):
+    storage.sync_delete_record("2026-10-05")
+    assert planilha["chamadas"][0]["corpo"] == {"segredo": "segredo-de-teste", "acao": "excluir", "data": "2026-10-05"}
+
+
+@pytest.mark.parametrize("resposta", [
+    FakeResposta({"ok": False, "erro": "não autorizado"}),
+    FakeResposta({"ok": True}, status=500),
+    FakeResposta(None, texto="<html>página de login do Google</html>"),
+    FakeResposta([{"data": "2026-10-01"}]),  # formato do Apps Script antigo
+    requests.ConnectionError("sem internet"),
+])
+def test_falha_da_planilha_vira_erro_visivel(planilha, resposta):
+    planilha["resposta"] = resposta
+    with pytest.raises(storage.CloudSyncError):
+        storage.sync_upsert_records([REG_02_10])
+
+
+def test_mensagem_de_erro_nao_vaza_segredo(planilha):
+    planilha["resposta"] = requests.ConnectionError("falhou https://exemplo.invalid/exec segredo-de-teste")
+    with pytest.raises(storage.CloudSyncError) as exc:
+        storage.sync_delete_record("2026-10-05")
+    assert "segredo-de-teste" not in str(exc.value)
+
+
+def test_enviar_pendentes_mantem_pendencias_quando_falha(planilha):
+    pendentes = {"2026-10-02": REG_02_10, "2026-10-05": None}
+    planilha["resposta"] = FakeResposta({"ok": False, "erro": "fora do ar"})
+    restantes, erro = storage.enviar_pendentes(pendentes)
+    assert restantes == pendentes and "fora do ar" in erro
+
+    planilha["resposta"] = FakeResposta({"ok": True})
+    planilha["chamadas"].clear()
+    restantes, erro = storage.enviar_pendentes(pendentes)
+    assert restantes == {} and erro is None
+    assert [c["corpo"]["acao"] for c in planilha["chamadas"]] == ["gravar", "excluir"]
+
+
+def test_aplicar_pendentes_sobre_dados_da_planilha():
+    da_planilha = [{"data": "2026-10-05", "entrada": "08:00:00"}, {"data": "2026-10-06", "entrada": "08:00:00"}]
+    resultado = storage.aplicar_pendentes(da_planilha, {"2026-10-02": REG_02_10, "2026-10-05": None})
+    assert [r["data"] for r in resultado] == ["2026-10-02", "2026-10-06"]
+
+
+def test_listar_ignora_config_json_e_normaliza(planilha, tmp_path, monkeypatch):
+    planilha["resposta"] = FakeResposta({"ok": True, "registros": [
+        {"data": "CONFIG_JSON", "observacao": '{"pin_estagiario": "0000"}'},
+        {"data": "2026-10-02", "entrada": "8:15:00", "inicio_pausa": "", "fim_pausa": "",
+         "saida": "15:15", "meta_dia": "6,0", "observacao": ""},
+    ]})
+    cache = tmp_path / "ponto_eletronico.json"
+    monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", str(cache))
+    db = storage.load_database(str(cache))
+    assert [r["data"] for r in db["registros"]] == ["2026-10-02"]
+    assert db["registros"][0]["entrada"] == "08:15:00"
+    assert db["registros"][0]["saida"] == "15:15:00"
+    assert db["registros"][0]["inicio_pausa"] is None
+    assert db["registros"][0]["meta_dia"] == 6.0
+    assert "pin_estagiario" not in json.dumps(db)
+    assert planilha["chamadas"][0]["corpo"]["acao"] == "listar"
+
+
+def test_falha_na_leitura_usa_cache_local_e_avisa(planilha, tmp_path, monkeypatch):
+    cache = tmp_path / "ponto_eletronico.json"
+    cache.write_text(json.dumps({"registros": [REG_02_10]}), encoding="utf-8")
+    monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", str(cache))
+    planilha["resposta"] = FakeResposta({"ok": False, "erro": "não autorizado"})
+    avisos = []
+    db = storage.load_database(str(cache), avisos=avisos)
+    assert [r["data"] for r in db["registros"]] == ["2026-10-02"]
+    assert len(avisos) == 1 and "não autorizado" in avisos[0]
+
+
+def test_cache_local_nao_guarda_configuracao_nem_senha(tmp_path):
+    cache = tmp_path / "cache.json"
+    storage.save_database({"config": {"pin_estagiario": "9999"}, "registros": [REG_02_10]}, str(cache))
+    conteudo = json.loads(cache.read_text(encoding="utf-8"))
+    assert conteudo == {"registros": [REG_02_10]}
+
+
+def test_sem_secrets_nao_tenta_nuvem(monkeypatch):
+    monkeypatch.delenv("APPS_SCRIPT_URL", raising=False)
+    monkeypatch.delenv("APPS_SCRIPT_SECRET", raising=False)
+    monkeypatch.setattr(storage, "_get_secret_or_default", lambda k, d="": "")
+    assert storage.is_cloud_configured() is False
+    assert storage.enviar_pendentes({"2026-10-02": REG_02_10}) == ({}, None)
+
+
+# ---------------------------------------------------------------------------
+# Autenticação
+# ---------------------------------------------------------------------------
+
+def test_senha_correta_e_errada():
+    h = auth.gerar_hash_senha("abc-123", iteracoes=1000)
+    assert auth.verificar_senha("abc-123", h)
+    assert not auth.verificar_senha("abc-124", h)
+    assert not auth.verificar_senha("abc-123", "")
+    assert not auth.verificar_senha("abc-123", "lixo")
+    assert h != auth.gerar_hash_senha("abc-123", iteracoes=1000)  # salt aleatório
+
+
+def test_token_valido_adulterado_e_expirado():
+    agora = 1_800_000_000
+    tok = auth.gerar_token_login("estagiario", "s3gr3do", dias=30, agora=agora)
+    assert auth.validar_token_login(tok, "s3gr3do", agora=agora + 3600) == "estagiario"
+    assert auth.validar_token_login(tok, "outro", agora=agora) is None
+    assert auth.validar_token_login(tok.replace("estagiario", "gestao", 1), "s3gr3do", agora=agora) is None
+    perfil, expira, assinatura = tok.split(".")
+    assert auth.validar_token_login(f"{perfil}.{int(expira) + 999}.{assinatura}", "s3gr3do", agora=agora) is None
+    assert auth.validar_token_login(tok, "s3gr3do", agora=agora + 31 * 24 * 3600) is None
+    assert auth.validar_token_login(None, "s3gr3do") is None
+    assert auth.validar_token_login("a.b", "s3gr3do") is None
+    with pytest.raises(ValueError):
+        auth.gerar_token_login("admin", "s3gr3do")
+
+
+SENHA_TESTE = "senha-de-teste"
+SENHA_CHEFIA_TESTE = "chefia-de-teste"
+
+
+def _app_de_teste():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("app.py", default_timeout=30)
+    at.secrets["usuario_estagiario"] = "carlos"
+    at.secrets["senha_estagiario_hash"] = auth.gerar_hash_senha(SENHA_TESTE, iteracoes=1000)
+    at.secrets["senha_chefia_hash"] = auth.gerar_hash_senha(SENHA_CHEFIA_TESTE, iteracoes=1000)
+    at.secrets["cookie_secret"] = "cookie-secret-de-teste"
+    return at
+
+
+@pytest.fixture
+def app_offline(monkeypatch, tmp_path):
+    """Roda o app sem planilha e com cache vazio em pasta temporária."""
+    monkeypatch.delenv("APPS_SCRIPT_URL", raising=False)
+    monkeypatch.delenv("APPS_SCRIPT_SECRET", raising=False)
+    monkeypatch.setattr(storage, "is_cloud_configured", lambda: False)
+    monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", str(tmp_path / "ponto_eletronico.json"))
+    return _app_de_teste()
+
+
+def _html_da_pagina(at) -> str:
+    return " ".join(str(getattr(el, "proto", el)) for el in at.main)
+
+
+def test_tela_de_login_nao_expoe_token_nem_senha(app_offline):
+    at = app_offline.run()
+    assert not at.exception
+    pagina = _html_da_pagina(at)
+    assert "cookie-secret-de-teste" not in pagina
+    assert "pbkdf2_sha256" not in pagina
+    assert "localStorage.getItem" not in pagina
+    assert "token" not in pagina.lower()
+
+
+def test_login_estagiario_senha_errada_e_certa(app_offline):
+    at = app_offline.run()
+    at.text_input[0].input("carlos")
+    at.text_input[1].input("errada")
+    at.button[0].click().run()
+    assert any("incorretos" in e.value for e in at.error)
+    assert at.session_state["perfil_ativo"] is None
+
+    at.text_input[0].input("carlos")
+    at.text_input[1].input(SENHA_TESTE)
+    at.button[0].click().run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] == "estagiario"
+
+
+def test_chefia_exige_senha(app_offline):
+    at = app_offline.run()
+    campo_chefia = [t for t in at.text_input if "chefia" in t.label.lower()][0]
+    botao_chefia = [b for b in at.button if "SUPERVISOR" in b.label][0]
+    campo_chefia.input("")
+    botao_chefia.click().run()
+    assert at.session_state["perfil_ativo"] is None
+
+    campo_chefia = [t for t in at.text_input if "chefia" in t.label.lower()][0]
+    botao_chefia = [b for b in at.button if "SUPERVISOR" in b.label][0]
+    campo_chefia.input(SENHA_CHEFIA_TESTE)
+    botao_chefia.click().run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] == "gestao"
+
+
+# ---------------------------------------------------------------------------
+# HTML escapado e nenhum segredo no código versionado
+# ---------------------------------------------------------------------------
+
+def test_observacao_com_script_e_escapada_no_boletim():
+    reg = dict(REG_02_10, data="2026-10-02", observacao="<script>alert(1)</script>")
+    cfg = {"nome_estagiario": "<b>Fulano</b>", "empresa_setor": "<i>x</i>", "carga_horaria_diaria": 6.0}
+    html_fusp = generate_fusp_timesheet_html([reg], cfg, 2026, 10)
+    assert "<script>alert(1)</script>" not in html_fusp
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_fusp
+    assert "<b>Fulano</b>" not in html_fusp
+    assert "&lt;b&gt;Fulano&lt;/b&gt;" in html_fusp
+
+
+def test_nenhum_segredo_ou_dado_pessoal_no_codigo():
+    raiz = Path(__file__).parent
+    arquivos = [p for padrao in ("*.py", "*.gs", "apps_script/*.gs", ".streamlit/*.example", "*.md", "docs/*.md")
+                for p in raiz.glob(padrao) if p.name != Path(__file__).name]
+    proibidos = [
+        r"script\.google\.com/macros/s/AK",          # URL real do Apps Script
+        r"docs\.google\.com/spreadsheets/d/[\w-]{20,}",  # ID real da planilha
+        r"pbkdf2_sha256\$\d+\$[0-9a-f]{32}\$",        # hash real de senha
+        r"pin_estagiario",
+        r"Marreta",
+        r"\b1122\b",
+    ]
+    for arq in arquivos:
+        if arq.name in ("projeto_completo.md",):
+            continue
+        texto = arq.read_text(encoding="utf-8", errors="ignore")
+        for padrao in proibidos:
+            assert not re.search(padrao, texto), f"{arq.name} contém {padrao}"
+
 
 if __name__ == "__main__":
     test_all()

@@ -5,6 +5,23 @@ Resume a análise do projeto, o que já foi feito e o que falta.
 
 ---
 
+## STATUS em 01/11/2026 (noite) — leia antes da seção 0
+
+- Etapa 1 ✅. **Etapa 2 ✅ no código** (sync por registro, síncrono, aviso + reenvio; `apps_script/Code.gs`
+  escrito com segredo, trava `LockService`, remoção automática da linha `CONFIG_JSON`).
+  **Etapa 3 ✅ no código**: URLs/PIN/nomes fora do código; login por hash PBKDF2 (biblioteca padrão,
+  em vez de bcrypt, para não adicionar dependência); chefia com senha própria; token assinado com
+  validade de 30 dias só em cookie; tela de login sem token; `html.escape` no boletim e cabeçalhos;
+  configurações pessoais em `st.secrets` `[perfil]` (a aba de config no app virou somente leitura).
+- Proteção extra: o app só faz POST se o `doGet` responder `versao: 2`. O Apps Script ANTIGO trata
+  qualquer POST como "substituir a planilha inteira", então sem a trava o app novo poderia apagá-la.
+- `.streamlit/secrets.toml` local já tem as chaves novas (senhas novas geradas; o PIN antigo morreu).
+- **Pendente, depende do Carlos:** colar `Code.gs` + propriedade `SEGREDO` no Apps Script e publicar
+  nova versão (mesma URL); Etapa 4 (Streamlit Cloud); Etapa 5 (os 3 registros: a gravação direta foi
+  bloqueada pelo controle de permissões, então entram pelo app depois do Apps Script novo — conferido
+  offline que outubro fica 20/20); Etapa 6.
+- Planilha conferida em 01/11: 22 registros, idêntica ao JSON local; nada foi gravado nela hoje.
+
 ## 0. PLANO ATUAL — leia primeiro (atualizado 31/10, 15h)
 
 O Carlos quer **deixar de depender do PC do ICMC** e bater ponto de qualquer lugar

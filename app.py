@@ -4,6 +4,7 @@ Identidade visual minimalista e moderna inspirada no ICMC/USP com acabamento met
 """
 
 import os
+import html
 import json
 from datetime import datetime, date, time
 import streamlit as st
@@ -17,6 +18,9 @@ from storage import (
     upsert_record,
     delete_record_by_date,
     export_df_to_csv_bytes,
+    enviar_pendentes,
+    aplicar_pendentes,
+    is_cloud_configured,
     DEFAULT_DATA_PATH,
 )
 from calculations import (
@@ -42,8 +46,7 @@ from components import (
     render_charts,
     render_manager_screen,
     render_welcome_screen,
-    compute_auth_token,
-    get_auth_cookie,
+    perfil_do_cookie,
     agendar_cookie_login,
     sync_auth_cookie,
 )
@@ -63,7 +66,47 @@ inject_custom_theme()
 def init_session_state(force_reload: bool = False):
     """Inicializa e carrega os dados mais recentes do banco de dados."""
     if force_reload or "db" not in st.session_state:
-        st.session_state.db = load_database()
+        avisos = []
+        db_carregado = load_database(avisos=avisos)
+        # Alterações que ainda não chegaram à planilha continuam valendo nesta sessão
+        db_carregado["registros"] = aplicar_pendentes(
+            db_carregado["registros"], st.session_state.get("pendentes_sync", {})
+        )
+        st.session_state.db = db_carregado
+        st.session_state["avisos_nuvem"] = avisos
+
+
+def persistir_alteracoes(alteracoes):
+    """
+    Salva o cache local e envia à planilha SÓ as datas alteradas (data -> registro, ou None para excluir).
+    Se a planilha falhar, as alterações ficam pendentes nesta sessão e um aviso aparece no topo.
+    Retorna True se a planilha confirmou.
+    """
+    save_database(st.session_state.db)
+    pendentes = {**st.session_state.get("pendentes_sync", {}), **alteracoes}
+    restantes, erro = enviar_pendentes(pendentes)
+    st.session_state["pendentes_sync"] = restantes
+    st.session_state["erro_sync"] = erro
+    return erro is None
+
+
+def render_aviso_sincronizacao():
+    """Mostra avisos de leitura da planilha e alterações que não foram salvas nela, com botão de reenvio."""
+    for aviso in st.session_state.get("avisos_nuvem", []):
+        st.warning(aviso)
+    pendentes = st.session_state.get("pendentes_sync", {})
+    if not pendentes:
+        return
+    datas = ", ".join(datetime.strptime(d, "%Y-%m-%d").strftime("%d/%m") for d in sorted(pendentes))
+    st.error(
+        f"**{len(pendentes)} alteração(ões) NÃO foram salvas na planilha** ({datas}). "
+        f"Motivo: {st.session_state.get('erro_sync') or 'desconhecido'}  \n"
+        "Elas estão só nesta aba do navegador: não feche a página antes de reenviar."
+    )
+    if st.button("REENVIAR AGORA PARA A PLANILHA", type="primary", key="btn_reenviar_pendentes"):
+        if persistir_alteracoes({}):
+            st.toast("Alterações pendentes salvas na planilha.")
+        st.rerun()
 
 
 init_session_state()
@@ -82,54 +125,24 @@ hoje_str = hoje.strftime("%Y-%m-%d")
 registro_hoje = get_record_by_date(registros, hoje_str)
 
 # -------------------------------------------------------------
-# GERENCIAMENTO DE PERFIL E AUTENTICAÇÃO (USUÁRIO E SENHA)
+# AUTENTICAÇÃO (senhas como hash em st.secrets; login lembrado por cookie assinado)
 # -------------------------------------------------------------
-usuario_cadastrado = str(config.get("usuario_estagiario", "")).strip() or "carlos"
-pin_cadastrado = str(config.get("pin_estagiario", "")).strip() or "1122"
-expected_token = compute_auth_token(usuario_cadastrado, pin_cadastrado)
-
-acesso_param = st.query_params.get("acesso")
-token_param = st.query_params.get("token")
-# Login lembrado: cookie gravado quando "Lembrar login neste navegador" foi marcado
-cookie_valido = get_auth_cookie() == expected_token
+# Versões antigas punham o token de login na URL: remove para não ficar no histórico do navegador
+if "token" in st.query_params:
+    del st.query_params["token"]
 
 if "perfil_ativo" not in st.session_state:
-    if acesso_param in ("gestao", "chefia", "supervisor"):
-        st.session_state["perfil_ativo"] = "gestao"
-        if cookie_valido:
-            # Permite voltar ao perfil de estagiário sem digitar a senha
-            st.session_state["autenticado_estagiario"] = True
-            st.session_state["login_lembrado"] = True
-    elif acesso_param in ("estagiario", "estagio") and token_param == expected_token:
-        st.session_state["perfil_ativo"] = "estagiario"
-        st.session_state["autenticado_estagiario"] = True
-        st.session_state["login_lembrado"] = cookie_valido
-    elif cookie_valido:
-        st.session_state["perfil_ativo"] = "estagiario"
-        st.session_state["autenticado_estagiario"] = True
-        st.session_state["login_lembrado"] = True
-        st.query_params["acesso"] = "estagiario"
-        st.query_params["token"] = expected_token
-    else:
-        st.session_state["perfil_ativo"] = None
+    perfil_lembrado = perfil_do_cookie()
+    st.session_state["perfil_ativo"] = perfil_lembrado
+    st.session_state["autenticado_estagiario"] = perfil_lembrado == "estagiario"
+    st.session_state["login_lembrado"] = perfil_lembrado is not None
 
-# Se o perfil for estagiário mas não estiver autenticado na sessão nem com token válido, exige login
-if st.session_state.get("perfil_ativo") == "estagiario" and not st.session_state.get("autenticado_estagiario"):
-    if token_param == expected_token:
-        st.session_state["autenticado_estagiario"] = True
-    else:
-        st.session_state["perfil_ativo"] = None
-
-# Grava/remove o cookie "Lembrar login" se houver ação pendente (após login, logout ou troca de senha)
+# Grava/remove o cookie "Lembrar login" se houver ação pendente (após login ou logout)
 sync_auth_cookie()
 
 # Se nenhum perfil estiver ativo, exibe a tela inicial de seleção e login:
 if st.session_state["perfil_ativo"] is None:
-    def salvar_config_callback(nova_config):
-        st.session_state.db["config"] = nova_config
-        save_database(st.session_state.db)
-
-    render_welcome_screen(config, on_save_config=salvar_config_callback)
+    render_welcome_screen()
     st.stop()
 
 # -------------------------------------------------------------
@@ -159,20 +172,15 @@ with st.sidebar:
         if st.button("Acesso Estagiário (Login)", use_container_width=True, key="btn_switch_to_estag"):
             if st.session_state.get("autenticado_estagiario"):
                 st.session_state["perfil_ativo"] = "estagiario"
-                st.query_params["acesso"] = "estagiario"
-                st.query_params["token"] = expected_token
             else:
                 st.session_state["perfil_ativo"] = None
-                if "acesso" in st.query_params:
-                    del st.query_params["acesso"]
             st.rerun()
     else:
-        st.caption(f"Perfil Ativo: **Estagiário(a)** (`{usuario_cadastrado}`)")
+        st.caption("Perfil Ativo: **Estagiário(a)**")
         col_sw1, col_sw2 = st.columns(2)
         with col_sw1:
             if st.button("Ver Chefia", use_container_width=True, key="btn_switch_to_gestao", help="Visualizar como a chefia visualiza o painel"):
                 st.session_state["perfil_ativo"] = "gestao"
-                st.query_params["acesso"] = "gestao"
                 st.rerun()
         with col_sw2:
             if st.button("Sair", use_container_width=True, key="btn_logout", help="Encerrar sessão e voltar para a tela de login"):
@@ -241,73 +249,14 @@ with st.sidebar:
         st.info("Visão Executiva: Modo de consulta e emissão de relatórios. Ações de bater ponto e configurações cadastrais estão desabilitadas para supervisão.")
     else:
         with st.expander("Configurações & Contrato", expanded=False):
-            nova_carga = st.number_input(
-                "Carga Horária Diária (horas):",
-                min_value=1.0,
-                max_value=12.0,
-                value=carga_padrao,
-                step=0.5,
-                help="6 horas por dia para jornadas de 30h semanais (Lei 11.788/2008).",
+            st.markdown(
+                f"**Carga diária:** {carga_padrao:g} h  \n"
+                f"**Dias úteis:** {', '.join(dias_uteis_padrao)}  \n"
+                f"**Estagiário(a):** {config.get('nome_estagiario', '')}  \n"
+                f"**Supervisor(a):** {config.get('nome_supervisor', '')}  \n"
+                f"**Projeto:** {config.get('empresa_setor', '')}"
             )
-
-            opcoes_dias = [
-                "Segunda-feira",
-                "Terça-feira",
-                "Quarta-feira",
-                "Quinta-feira",
-                "Sexta-feira",
-                "Sábado",
-                "Domingo",
-            ]
-            novos_dias = st.multiselect(
-                "Dias Úteis Esperados:",
-                options=opcoes_dias,
-                default=[d for d in dias_uteis_padrao if d in opcoes_dias],
-            )
-
-            nome_estag = st.text_input(
-                "Nome do Estagiário(a):",
-                value=config.get("nome_estagiario", "Carlos Henrique da Luz Pizzi"),
-            )
-
-            nome_superv = st.text_input(
-                "Nome do(a) Supervisor(a):",
-                value=config.get("nome_supervisor", "Gestor(a) / Supervisor(a)"),
-            )
-
-            empresa_setor = st.text_input(
-                "Departamento / Projeto:",
-                value=config.get("empresa_setor", "605001"),
-            )
-
-            novo_usuario = st.text_input(
-                "Usuário de Login (Estagiário):",
-                value=usuario_cadastrado,
-                help="Nome de usuário utilizado para entrar no sistema.",
-            )
-
-            novo_pin = st.text_input(
-                "Senha de Acesso (Estagiário):",
-                value=pin_cadastrado,
-                type="password",
-                help="Senha pessoal sincronizada na nuvem para acesso ao ponto.",
-            )
-
-            if st.button("Salvar Parâmetros", use_container_width=True):
-                config["carga_horaria_diaria"] = float(nova_carga)
-                config["dias_uteis"] = novos_dias
-                config["nome_estagiario"] = nome_estag
-                config["nome_supervisor"] = nome_superv
-                config["empresa_setor"] = empresa_setor
-                config["usuario_estagiario"] = novo_usuario.strip() if novo_usuario.strip() else usuario_cadastrado
-                config["pin_estagiario"] = novo_pin.strip() if novo_pin.strip() else pin_cadastrado
-                save_database(db)
-                st.query_params["token"] = compute_auth_token(config["usuario_estagiario"], config["pin_estagiario"])
-                if st.session_state.get("login_lembrado"):
-                    # Credenciais mudaram: atualiza o cookie "Lembrar login" com o novo token
-                    agendar_cookie_login(st.query_params["token"])
-                st.toast("Configurações e credenciais salvas na nuvem com sucesso.")
-                st.rerun()
+            st.caption("Esses dados ficam em secrets (seção [perfil]). Senhas: veja `gerar_hash_senha.py`.")
 
         st.divider()
 
@@ -377,7 +326,8 @@ with st.sidebar:
                 st.toast(f"Saída registrada às {timestamp_str}.")
 
             st.session_state.db["registros"] = upsert_record(st.session_state.db["registros"], reg)
-            save_database(st.session_state.db)
+            if not persistir_alteracoes({hoje_str: reg}):
+                st.toast("⚠️ Batida NÃO salva na planilha. Veja o aviso no topo e reenvie.")
             st.rerun()
 
 
@@ -404,7 +354,8 @@ with st.sidebar:
             handle_ponto_action("saida", now_br().strftime("%H:%M:%S"))
 
     st.divider()
-    st.caption(f"Base de dados: `{os.path.basename(DEFAULT_DATA_PATH)}` • Sincronizado Google Sheets")
+    origem_dados = "Google Sheets (por registro)" if is_cloud_configured() else "somente local"
+    st.caption(f"Base de dados: `{os.path.basename(DEFAULT_DATA_PATH)}` • {origem_dados}")
 
 # -------------------------------------------------------------
 # PROCESSAMENTO DOS DADOS PARA O PERÍODO SELECIONADO
@@ -452,6 +403,8 @@ if st.session_state["perfil_ativo"] == "gestao":
 nome_usuario = config.get("nome_estagiario", "Estagiário(a)")
 empresa_usuario = config.get("empresa_setor", "ICMC / USP")
 
+render_aviso_sincronizacao()
+
 knot_header = get_knot_svg_html(size=30)
 render_html(
     f"""
@@ -459,8 +412,8 @@ render_html(
         <div style="display: flex; align-items: center; gap: 12px;">
             {knot_header}
             <div>
-                <div class="brand-title">CONTROLE DE PONTO • {nome_usuario.upper()}</div>
-                <div class="brand-sub">{empresa_usuario} • Período de {meses_pt[mes_selecionado-1]} de {ano_selecionado}</div>
+                <div class="brand-title">CONTROLE DE PONTO • {html.escape(nome_usuario.upper())}</div>
+                <div class="brand-sub">{html.escape(empresa_usuario)} • Período de {meses_pt[mes_selecionado-1]} de {ano_selecionado}</div>
             </div>
         </div>
         <div>
@@ -624,8 +577,10 @@ with tab_manual:
                     }
 
                 st.session_state.db["registros"] = upsert_record(st.session_state.db["registros"], novo_reg)
-                save_database(st.session_state.db)
-                st.toast(f"Registro de {data_ajuste.strftime('%d/%m/%Y')} gravado com sucesso.")
+                if persistir_alteracoes({data_ajuste_str: novo_reg}):
+                    st.toast(f"Registro de {data_ajuste.strftime('%d/%m/%Y')} gravado com sucesso.")
+                else:
+                    st.toast("⚠️ Registro NÃO salvo na planilha. Veja o aviso no topo e reenvie.")
                 st.rerun()
 
     if reg_existente:
@@ -634,8 +589,10 @@ with tab_manual:
             st.caption(f"Confirma a exclusão definitiva do registro de {data_ajuste.strftime('%d/%m/%Y')}?")
             if st.button("EXCLUIR REGISTRO", type="secondary", key="btn_del_reg"):
                 st.session_state.db["registros"] = delete_record_by_date(st.session_state.db["registros"], data_ajuste_str)
-                save_database(st.session_state.db)
-                st.toast(f"Registro de {data_ajuste.strftime('%d/%m/%Y')} removido.")
+                if persistir_alteracoes({data_ajuste_str: None}):
+                    st.toast(f"Registro de {data_ajuste.strftime('%d/%m/%Y')} removido.")
+                else:
+                    st.toast("⚠️ Exclusão NÃO feita na planilha. Veja o aviso no topo e reenvie.")
                 st.rerun()
 
 # TAB 5: BOLETIM DE FREQUÊNCIA FUSP (MODELO OFICIAL)
@@ -739,10 +696,20 @@ with tab_exportar:
             try:
                 uploaded_data = json.load(upload_backup)
                 if "registros" in uploaded_data and isinstance(uploaded_data["registros"], list):
+                    st.caption("Os registros do arquivo substituem os das mesmas datas; outras datas não são apagadas.")
                     if st.button("RESTAURAR ARQUIVO ENVIADO", type="primary"):
-                        st.session_state.db = uploaded_data
-                        save_database(uploaded_data)
-                        st.toast("Dados restaurados com sucesso.")
+                        restaurados = {
+                            str(r["data"]): r for r in uploaded_data["registros"]
+                            if isinstance(r, dict) and r.get("data") not in (None, "", "CONFIG_JSON", "__CONFIG__")
+                        }
+                        regs_atuais = st.session_state.db["registros"]
+                        for r in restaurados.values():
+                            regs_atuais = upsert_record(regs_atuais, r)
+                        st.session_state.db["registros"] = regs_atuais
+                        if persistir_alteracoes(restaurados):
+                            st.toast(f"{len(restaurados)} registro(s) restaurados e salvos na planilha.")
+                        else:
+                            st.toast("⚠️ Restauração NÃO salva na planilha. Veja o aviso no topo e reenvie.")
                         st.rerun()
                 else:
                     st.error("Formato inválido. O arquivo deve conter o campo 'registros'.")

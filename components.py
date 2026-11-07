@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 
 from calculations import (
     decimal_hours_to_hm_str,
+    somar_saldo,
     parse_time_str,
     format_time_str,
     compute_current_elapsed_time,
@@ -158,37 +159,38 @@ def sync_auth_cookie():
     )
 
 
-def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
+def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: float, rotulo_periodo: str):
     """
     Exibe os indicadores resumidos com estética minimalista metálica:
     - Dias Concluídos
     - Horas Realizadas
     - Carga Prevista
-    - Saldo do Banco de Horas
+    - Saldo do Período (muda com o filtro)
+    - Banco de Horas (total desde o início, não muda com o filtro)
     """
     if df_mes.empty:
         dias_trab = 0
         horas_totais = 0.0
-        saldo_total = 0.0
         meta_total = 0.0
     else:
         concluidos = df_mes[df_mes["Status"] == "Concluído"]
         apurados = df_mes[df_mes["Status"].isin(["Concluído", "Ausente"])]
         dias_trab = len(concluidos)
         horas_totais = concluidos["Horas Trabalhadas"].sum()
-        saldo_total = apurados["Saldo (h)"].sum()
         meta_total = apurados["Meta (h)"].sum()
 
     horas_totais_fmt = decimal_hours_to_hm_str(horas_totais)
     meta_total_fmt = decimal_hours_to_hm_str(meta_total)
-    saldo_fmt = decimal_hours_to_hm_str(saldo_total, show_sign=True)
+    saldo_fmt = decimal_hours_to_hm_str(saldo_banco, show_sign=True)
+    saldo_periodo_fmt = decimal_hours_to_hm_str(somar_saldo(df_mes), show_sign=True)
 
-    if saldo_total > 0.001:
+    # Mesmo critério do texto exibido: menos de 30 segundos aparece como 00h 00m (equilibrado).
+    if saldo_fmt.startswith("+"):
         saldo_accent = ICMC_COLORS["status_positive"]
         saldo_bg = "rgba(16, 185, 129, 0.08)"
         saldo_border = "rgba(16, 185, 129, 0.25)"
         saldo_label = "CRÉDITO (HORAS EXTRAS)"
-    elif saldo_total < -0.001:
+    elif saldo_fmt.startswith("-"):
         saldo_accent = ICMC_COLORS["status_negative"]
         saldo_bg = "rgba(239, 68, 68, 0.08)"
         saldo_border = "rgba(239, 68, 68, 0.25)"
@@ -199,16 +201,16 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
         saldo_border = "rgba(56, 189, 248, 0.25)"
         saldo_label = "JORNADA EQUILIBRADA"
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col_periodo, col4 = st.columns(5)
 
     with col1:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center;">
+            <div class="metal-card" style="text-align: center; min-height: 165px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     DIAS CONCLUÍDOS
                 </div>
-                <div style="font-size: 2rem; font-weight: 800; margin: 4px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
+                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
                     {dias_trab}
                 </div>
                 <div style="font-size: 0.75rem; color: {ICMC_COLORS['text_muted']};">dias com expediente fechado</div>
@@ -219,11 +221,11 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
     with col2:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center;">
+            <div class="metal-card" style="text-align: center; min-height: 165px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     HORAS REALIZADAS
                 </div>
-                <div style="font-size: 2rem; font-weight: 800; margin: 4px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
+                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
                     {horas_totais_fmt}
                 </div>
                 <div style="font-size: 0.75rem; color: {ICMC_COLORS['text_muted']};">{horas_totais:.2f}h decimais</div>
@@ -234,11 +236,11 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
     with col3:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center;">
+            <div class="metal-card" style="text-align: center; min-height: 165px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     CARGA PREVISTA
                 </div>
-                <div style="font-size: 2rem; font-weight: 800; margin: 4px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
+                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
                     {meta_total_fmt}
                 </div>
                 <div style="font-size: 0.75rem; color: {ICMC_COLORS['text_muted']};">base: {target_hours:g}h / dia útil</div>
@@ -246,14 +248,29 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float):
             """
         )
 
+    with col_periodo:
+        render_html(
+            f"""
+            <div class="metal-card" style="text-align: center; min-height: 165px;">
+                <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
+                    SALDO DO PERÍODO
+                </div>
+                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
+                    {saldo_periodo_fmt}
+                </div>
+                <div style="font-size: 0.75rem; color: {ICMC_COLORS['text_muted']};">{html.escape(rotulo_periodo)}</div>
+            </div>
+            """
+        )
+
     with col4:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center; background: {saldo_bg}; border: 1px solid {saldo_border};">
+            <div class="metal-card" style="text-align: center; min-height: 165px; background: {saldo_bg}; border: 1px solid {saldo_border};">
                 <div style="font-size: 0.72rem; color: {saldo_accent}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     BANCO DE HORAS
                 </div>
-                <div style="font-size: 2rem; font-weight: 800; margin: 4px 0; font-family: 'JetBrains Mono', monospace; color: {saldo_accent};">
+                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {saldo_accent};">
                     {saldo_fmt}
                 </div>
                 <div style="font-size: 0.72rem; font-weight: 600; color: {saldo_accent};">{saldo_label}</div>
@@ -431,19 +448,19 @@ def render_charts(df_mes: pd.DataFrame):
             x=concluidos["Data"],
             y=concluidos["Saldo Acumulado (h)"],
             mode="lines+markers",
-            name="Saldo Acumulado",
+            name="Banco de Horas",
             line=dict(color=ICMC_COLORS["steel_blue"], width=3),
             marker=dict(size=7, color="#0284C7", line=dict(color="#BAE6FD", width=1.5)),
             text=concluidos["Saldo Acumulado Formatado"],
-            hovertemplate="<b>Data:</b> %{x}<br><b>Saldo Acumulado:</b> %{text}<extra></extra>",
+            hovertemplate="<b>Data:</b> %{x}<br><b>Banco de Horas:</b> %{text}<extra></extra>",
         ))
 
         fig_line.add_hline(y=0, line_dash="dash", line_color="rgba(148, 163, 184, 0.4)", line_width=1)
 
         fig_line.update_layout(
             **layout_defaults,
-            title=dict(text="Evolução do Saldo Acumulado no Mês", font=dict(color=ICMC_COLORS["text_primary"], size=14)),
-            yaxis_title="Saldo Acumulado (Horas)",
+            title=dict(text="Evolução do Banco de Horas (total desde o início)", font=dict(color=ICMC_COLORS["text_primary"], size=14)),
+            yaxis_title="Banco de Horas (Horas)",
         )
         st.plotly_chart(fig_line, use_container_width=True)
 
@@ -478,6 +495,7 @@ def render_charts(df_mes: pd.DataFrame):
 
 def render_manager_screen(
     df_mes: pd.DataFrame,
+    saldo_banco: float,
     config: Dict[str, Any],
     registros: List[Dict[str, Any]],
     ano: int,
@@ -582,15 +600,12 @@ def render_manager_screen(
 
     if not df_mes.empty:
         concluidos = df_mes[df_mes["Status"] == "Concluído"]
-        apurados = df_mes[df_mes["Status"].isin(["Concluído", "Ausente"])]
         dias_trab = len(concluidos)
         horas_realizadas = concluidos["Horas Trabalhadas"].sum()
-        saldo_mes = apurados["Saldo (h)"].sum()
         media_dia = horas_realizadas / dias_trab if dias_trab > 0 else 0.0
     else:
         dias_trab = 0
         horas_realizadas = 0.0
-        saldo_mes = 0.0
         media_dia = 0.0
 
     pct_meta = (horas_realizadas / meta_horas_mes * 100) if meta_horas_mes > 0 else 0.0
@@ -615,20 +630,12 @@ def render_manager_screen(
         )
 
     with kpi3:
-        if saldo_mes >= 0:
-            st.metric(
-                label="Saldo do Banco de Horas",
-                value=decimal_hours_to_hm_str(saldo_mes, show_sign=True),
-                delta="Horas Extras (Crédito)",
-                delta_color="normal",
-            )
-        else:
-            st.metric(
-                label="Saldo do Banco de Horas",
-                value=decimal_hours_to_hm_str(saldo_mes, show_sign=True),
-                delta="Horas Devidas (Débito)",
-                delta_color="inverse",
-            )
+        st.metric(
+            label="Banco de Horas (total)",
+            value=decimal_hours_to_hm_str(saldo_banco, show_sign=True),
+            delta=f"Neste período: {decimal_hours_to_hm_str(somar_saldo(df_mes), show_sign=True)}",
+            delta_color="off",
+        )
 
     with kpi4:
         st.metric(
@@ -688,7 +695,11 @@ def render_manager_screen(
             "Saldo Acumulado Formatado", "Status", "Observação"
         ]
         cols_presentes = [c for c in colunas_chefia if c in df_mes.columns]
-        st.dataframe(df_mes[cols_presentes], use_container_width=True, height=300)
+        st.dataframe(
+            df_mes[cols_presentes].rename(columns={"Saldo Acumulado Formatado": "Banco de Horas"}),
+            use_container_width=True,
+            height=300,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 

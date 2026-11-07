@@ -3,7 +3,9 @@ Script de testes para verificar cálculos, regras de validação e persistência
 """
 
 import sys
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
+
+import pandas as pd
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -13,6 +15,7 @@ from calculations import (
     parse_time_str,
     format_time_str,
     process_records_dataframe,
+    somar_saldo,
     compute_current_elapsed_time,
     get_business_days_in_month,
     get_expected_business_days,
@@ -623,6 +626,93 @@ def test_nenhum_segredo_ou_dado_pessoal_no_codigo():
         texto = arq.read_text(encoding="utf-8", errors="ignore")
         for padrao in proibidos:
             assert not re.search(padrao, texto), f"{arq.name} contém {padrao}"
+
+
+def _dia(data, entrada="08:00:00", saida="14:00:00", meta=6.0, obs=""):
+    return {"data": data, "entrada": entrada, "inicio_pausa": None, "fim_pausa": None,
+            "saida": saida, "meta_dia": meta, "observacao": obs}
+
+
+def test_banco_de_horas_nao_depende_do_recorte():
+    """O banco é o total de tudo; o saldo do período é só a fatia daquele recorte."""
+    df = process_records_dataframe([
+        _dia("2026-10-20", saida="15:00:00"),  # +1h
+        _dia("2026-10-29", saida="13:30:00"),  # -30m
+        _dia("2026-11-05", saida="14:15:00"),  # +15m
+    ], 6.0)
+    mes_civil = df[df["raw_date"].str.startswith("2026-11")]
+    ciclo_fusp = df[(df["raw_date"] >= "2026-10-21") & (df["raw_date"] <= "2026-11-20")]
+
+    assert somar_saldo(df) == 0.75
+    assert somar_saldo(mes_civil) == 0.25
+    assert somar_saldo(ciclo_fusp) == -0.25
+
+
+def test_banco_de_horas_bate_com_ultima_linha_do_acumulado():
+    df = process_records_dataframe([
+        _dia("2026-10-01", saida="14:07:13"),
+        _dia("2026-10-02", entrada=None, saida=None),                     # ausente: -6h
+        _dia("2026-10-05", entrada=None, saida=None, meta=0.0, obs="Feriado"),
+        _dia("2026-10-06", saida=None),                                   # em andamento: não conta
+    ], 6.0)
+    assert abs(somar_saldo(df) - df.iloc[-1]["Saldo Acumulado (h)"]) < 1e-6
+
+
+def test_somar_saldo_sem_registros():
+    assert somar_saldo(pd.DataFrame()) == 0.0
+    assert somar_saldo(process_records_dataframe([], 6.0)) == 0.0
+
+
+def test_saldo_nao_acumula_erro_de_arredondamento():
+    """Dez dias com 20s a mais somam 3m20s. Arredondando cada dia, viravam 6 minutos."""
+    registros = [_dia(f"2026-10-{d:02d}", saida="14:00:20") for d in range(1, 11)]
+    df = process_records_dataframe(registros, 6.0)
+    assert decimal_hours_to_hm_str(somar_saldo(df), show_sign=True) == "+00h 03m"
+    assert df.iloc[-1]["Saldo Acumulado Formatado"] == "+00h 03m"
+
+
+def test_saldo_menor_que_um_minuto_nao_mostra_sinal():
+    assert decimal_hours_to_hm_str(20 / 3600, show_sign=True) == "00h 00m"
+    assert decimal_hours_to_hm_str(-20 / 3600, show_sign=True) == "00h 00m"
+
+
+def _registros_para_tela():
+    """Um dia antigo com +1h e o dia de hoje com +15m, em meses diferentes."""
+    hoje = today_br()
+    antigo = hoje - timedelta(days=40)
+    return {"registros": [
+        _dia(antigo.strftime("%Y-%m-%d"), saida="15:00:00"),
+        _dia(hoje.strftime("%Y-%m-%d"), saida="14:15:00"),
+    ]}
+
+
+def test_card_do_banco_nao_muda_com_o_filtro(app_offline, tmp_path):
+    (tmp_path / "ponto_eletronico.json").write_text(json.dumps(_registros_para_tela()), encoding="utf-8")
+    at = app_offline.run()
+    at.text_input[0].input("carlos")
+    at.text_input[1].input(SENHA_TESTE)
+    at.button[0].click().run()
+    assert not at.exception
+
+    pagina = _html_da_pagina(at)
+    assert "BANCO DE HORAS" in pagina and "+01h 15m" in pagina
+    assert "SALDO DO PERÍODO" in pagina and "+00h 15m" in pagina
+
+    at.radio(key="filtro_modo_periodo").set_value("Ciclo FUSP (21 a 20)").run()
+    assert not at.exception
+    assert "+01h 15m" in _html_da_pagina(at)
+
+
+def test_painel_da_chefia_mostra_banco_total_e_saldo_do_periodo(app_offline, tmp_path):
+    (tmp_path / "ponto_eletronico.json").write_text(json.dumps(_registros_para_tela()), encoding="utf-8")
+    at = app_offline.run()
+    [t for t in at.text_input if "chefia" in t.label.lower()][0].input(SENHA_CHEFIA_TESTE)
+    [b for b in at.button if "SUPERVISOR" in b.label][0].click().run()
+    assert not at.exception
+
+    banco = [m for m in at.metric if m.label == "Banco de Horas (total)"][0]
+    assert banco.value == "+01h 15m"
+    assert banco.delta == "Neste período: +00h 15m"
 
 
 if __name__ == "__main__":

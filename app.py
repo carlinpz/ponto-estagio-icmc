@@ -25,6 +25,7 @@ from storage import (
 )
 from calculations import (
     process_records_dataframe,
+    somar_saldo,
     decimal_hours_to_hm_str,
     parse_time_str,
     format_time_str,
@@ -350,6 +351,7 @@ with st.sidebar:
 # PROCESSAMENTO DOS DADOS PARA O PERÍODO SELECIONADO
 # -------------------------------------------------------------
 df_todos = process_records_dataframe(registros, config.get("carga_horaria_diaria", 6.0))
+saldo_banco = somar_saldo(df_todos)  # total desde o início: não depende do filtro de período
 
 if modo_periodo == "Ciclo FUSP (21 a 20)":
     inicio_fusp_sel, fim_fusp_sel, datas_fusp_sel = get_fusp_period_dates(ano_selecionado, mes_selecionado)
@@ -376,6 +378,7 @@ else:
 if st.session_state["perfil_ativo"] == "gestao":
     render_manager_screen(
         df_mes=df_mes,
+        saldo_banco=saldo_banco,
         config=config,
         registros=registros,
         ano=ano_selecionado,
@@ -402,7 +405,7 @@ render_html(
             {knot_header}
             <div>
                 <div class="brand-title">CONTROLE DE PONTO • {html.escape(nome_usuario.upper())}</div>
-                <div class="brand-sub">{html.escape(empresa_usuario)} • Período de {meses_pt[mes_selecionado-1]} de {ano_selecionado}</div>
+                <div class="brand-sub">{html.escape(empresa_usuario)} • {rotulo_periodo_ativo}</div>
             </div>
         </div>
         <div>
@@ -413,7 +416,7 @@ render_html(
 )
 
 # Painel de Métricas (Dashboard no Topo)
-render_metric_cards(df_mes, config.get("carga_horaria_diaria", 6.0))
+render_metric_cards(df_mes, config.get("carga_horaria_diaria", 6.0), saldo_banco, rotulo_periodo_ativo)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -451,7 +454,7 @@ with tab_graficos:
 
 # TAB 3: TABELA DE HISTÓRICO
 with tab_historico:
-    st.markdown(f"##### Registros de {meses_pt[mes_selecionado-1]} de {ano_selecionado}")
+    st.markdown(f"##### Registros: {rotulo_periodo_ativo}")
 
     if df_mes.empty:
         st.info("Nenhum registro encontrado para o período selecionado.")
@@ -471,7 +474,11 @@ with tab_historico:
             "Observação",
         ]
         cols_presentes = [c for c in colunas_exibicao if c in df_mes.columns]
-        st.dataframe(df_mes[cols_presentes], use_container_width=True, height=360)
+        st.dataframe(
+            df_mes[cols_presentes].rename(columns={"Saldo Acumulado Formatado": "Banco de Horas"}),
+            use_container_width=True,
+            height=360,
+        )
 
 # TAB 4: LANÇAMENTO / AJUSTE MANUAL
 with tab_manual:

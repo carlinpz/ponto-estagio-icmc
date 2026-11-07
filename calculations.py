@@ -56,14 +56,15 @@ def decimal_hours_to_hm_str(hours: float, show_sign: bool = False) -> str:
      -2.25 -> '-02h 15m'
       0.0  -> '00h 00m'
     """
+    total_minutes = int(round(abs(hours) * 60))
+
+    # O sinal olha o valor já em minutos: 20 segundos de saldo aparecem como 00h 00m, sem sinal.
     sign = ""
-    if hours < 0:
+    if hours < 0 and total_minutes > 0:
         sign = "-"
-        hours = abs(hours)
-    elif show_sign and hours > 0:
+    elif show_sign and hours > 0 and total_minutes > 0:
         sign = "+"
 
-    total_minutes = int(round(hours * 60))
     h = total_minutes // 60
     m = total_minutes % 60
     return f"{sign}{h:02d}h {m:02d}m"
@@ -114,8 +115,9 @@ def calculate_day_worked_hours(
     if horas_liquidas < timedelta(0):
         horas_liquidas = timedelta(0)
 
-    decimal_hours = timedelta_to_decimal_hours(horas_liquidas)
-    return round(decimal_hours, 2), "Concluído"
+    # Sem arredondar: o saldo soma vários dias, e o erro de cada um se acumularia.
+    # O arredondamento acontece só na hora de exibir.
+    return timedelta_to_decimal_hours(horas_liquidas), "Concluído"
 
 
 def compute_current_elapsed_time(entrada: str, inicio_pausa: Optional[str] = None, fim_pausa: Optional[str] = None) -> float:
@@ -258,7 +260,7 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
 
         # Se tiver saída registrada, calculamos o saldo
         if saida and parse_time_str(saida):
-            saldo = round(horas_trab - meta, 2)
+            saldo = horas_trab - meta
             saldo_fmt = decimal_hours_to_hm_str(saldo, show_sign=True)
             horas_fmt = decimal_hours_to_hm_str(horas_trab)
         elif entrada:
@@ -300,10 +302,23 @@ def process_records_dataframe(records: List[Dict[str, Any]], target_hours_per_da
     # Ordenar por data cronológica e garantir unicidade
     if not df.empty and "date_obj" in df.columns:
         df = df.drop_duplicates(subset=["raw_date"], keep="last").sort_values(by="raw_date", ascending=True).reset_index(drop=True)
-        df["Saldo Acumulado (h)"] = df["Saldo (h)"].cumsum().round(2)
+        df["Saldo Acumulado (h)"] = df["Saldo (h)"].cumsum().round(6)
         df["Saldo Acumulado Formatado"] = df["Saldo Acumulado (h)"].apply(lambda s: decimal_hours_to_hm_str(s, show_sign=True))
 
     return df
+
+
+def somar_saldo(df: pd.DataFrame) -> float:
+    """
+    Soma o saldo dos dias do DataFrame recebido.
+
+    É a única conta de saldo do app. Com todos os registros, o resultado é o Banco de Horas
+    (acumula desde o primeiro dia, nunca zera). Com um recorte, é o saldo daquele período.
+    Dias em andamento e feriados têm saldo 0, então não precisam de filtro.
+    """
+    if df.empty or "Saldo (h)" not in df.columns:
+        return 0.0
+    return round(float(df["Saldo (h)"].sum()), 6)
 
 
 def get_business_days_in_month(year: int, month: int, working_weekdays: List[str]) -> int:

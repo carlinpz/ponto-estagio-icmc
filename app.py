@@ -562,7 +562,7 @@ with tab_manual:
                         "fim_pausa": format_time_str(input_fim_pausa, include_seconds=True) if teve_pausa else None,
                         "saida": format_time_str(input_saida, include_seconds=True) if teve_saida else None,
                         "meta_dia": float(input_meta),
-                        "observacao": input_obs or "Ajuste manual",
+                        "observacao": input_obs,
                     }
 
                 st.session_state.db["registros"] = upsert_record(st.session_state.db["registros"], novo_reg)

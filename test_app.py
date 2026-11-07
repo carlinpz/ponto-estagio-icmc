@@ -19,6 +19,7 @@ from calculations import (
     detect_compliance_issues,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
+    today_br,
 )
 from storage import (
     load_database,
@@ -172,7 +173,7 @@ import auth
 
 REG_02_10 = {
     "data": "2026-10-02", "entrada": "08:15:00", "inicio_pausa": "12:40:00",
-    "fim_pausa": "13:40:00", "saida": "15:15:00", "meta_dia": 6.0, "observacao": "Ajuste manual",
+    "fim_pausa": "13:40:00", "saida": "15:15:00", "meta_dia": 6.0, "observacao": "Ajuste de horário",
 }
 
 
@@ -374,7 +375,11 @@ def app_offline(monkeypatch, tmp_path):
     monkeypatch.delenv("APPS_SCRIPT_URL", raising=False)
     monkeypatch.delenv("APPS_SCRIPT_SECRET", raising=False)
     monkeypatch.setattr(storage, "is_cloud_configured", lambda: False)
-    monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", str(tmp_path / "ponto_eletronico.json"))
+    cache_de_teste = str(tmp_path / "ponto_eletronico.json")
+    monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", cache_de_teste)
+    # O caminho padrão é fixado quando a função é definida: sem isto, o teste usaria o cache real
+    monkeypatch.setattr(storage.load_database, "__defaults__", (cache_de_teste, None))
+    monkeypatch.setattr(storage.save_database, "__defaults__", (cache_de_teste,))
     # Sem navegador de verdade no teste: simula a resposta "não há cookie de login"
     import components
     monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: "")
@@ -553,6 +558,42 @@ def test_chefia_exige_senha(app_offline):
 # ---------------------------------------------------------------------------
 # HTML escapado e nenhum segredo no código versionado
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("texto", ["Ajuste manual", "ajuste manual", "  AJUSTE MANUAL "])
+def test_ajuste_manual_nao_aparece_no_boletim(texto):
+    """Registros antigos da planilha ainda têm esse texto; ele não pode sair no boletim."""
+    reg = dict(REG_02_10, data="2026-10-02", observacao=texto)
+    assert "ajuste manual" not in generate_fusp_timesheet_html([reg], {"carga_horaria_diaria": 6.0}, 2026, 10).lower()
+
+
+def test_observacao_escrita_pelo_estagiario_continua_no_boletim():
+    reg = dict(REG_02_10, data="2026-10-02", observacao="Consulta médica")
+    assert "Consulta médica" in generate_fusp_timesheet_html([reg], {"carga_horaria_diaria": 6.0}, 2026, 10)
+
+
+def test_ajuste_manual_some_ao_carregar_sem_mexer_nas_outras_observacoes():
+    registros = storage._deduplicate_records([
+        dict(REG_02_10, data="2026-10-02", observacao=" Ajuste manual "),
+        dict(REG_02_10, data="2026-10-05", observacao="Ajuste do relógio"),
+    ])
+    assert [r["observacao"] for r in registros] == ["", "Ajuste do relógio"]
+
+
+def test_salvar_ajuste_sem_observacao_grava_vazio(app_offline, tmp_path, monkeypatch):
+    enviados = {}
+    monkeypatch.setattr(storage, "enviar_pendentes", lambda p: (enviados.update(p), ({}, None))[1])
+    (tmp_path / "ponto_eletronico.json").write_text(
+        json.dumps({"registros": [dict(REG_02_10, data="2026-10-02")]}), encoding="utf-8"
+    )
+    at = app_offline.run()
+    at.text_input[0].input("carlos")
+    at.text_input[1].input(SENHA_TESTE)
+    at.button[0].click().run()
+    [b for b in at.button if "SALVAR REGISTRO MANUAL" in b.label][0].click().run()
+    assert not at.exception
+    hoje = today_br().strftime("%Y-%m-%d")
+    assert enviados[hoje]["observacao"] == ""  # é isto que iria para a planilha
+
 
 def test_observacao_com_script_e_escapada_no_boletim():
     reg = dict(REG_02_10, data="2026-10-02", observacao="<script>alert(1)</script>")

@@ -436,8 +436,12 @@ def detect_compliance_issues(records: List[Dict[str, Any]], target_hours: float)
     return issues
 
 
+# Texto que o app gravava sozinho em ajustes sem observação. Não é mais gravado, mas segue em
+# registros antigos da planilha, por isso continua sendo filtrado.
+OBSERVACAO_AJUSTE_MANUAL = "ajuste manual"
+
 # Observações geradas automaticamente pelo sistema que não devem aparecer nos boletins impressos.
-OBSERVACOES_OCULTAS_BOLETIM = {"registro via ponto rápido"}
+OBSERVACOES_OCULTAS_BOLETIM = {"registro via ponto rápido", OBSERVACAO_AJUSTE_MANUAL}
 
 
 def limpar_observacao_boletim(obs: Any) -> str:

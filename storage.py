@@ -13,6 +13,8 @@ import os
 from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 
+from calculations import OBSERVACAO_AJUSTE_MANUAL
+
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "ponto_eletronico.json")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -43,6 +45,8 @@ def _deduplicate_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         d_val = str(r.get("data", "")).strip()
         if not d_val or d_val in ("CONFIG_JSON", "__CONFIG__"):
             continue
+        if str(r.get("observacao", "") or "").strip().lower() == OBSERVACAO_AJUSTE_MANUAL:
+            r = {**r, "observacao": ""}  # só some da leitura e do cache: a planilha não é alterada aqui
         dedup[d_val] = r
     result = list(dedup.values())
     result.sort(key=lambda x: str(x.get("data", "")))

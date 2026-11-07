@@ -173,8 +173,9 @@ Entregáveis extras:
   (entrada 08:00 + pausa 07:00–07:30 + saída 14:00 calcula 5,5 h sem erro).
 - **Alerta legal inconsistente:** dispara > 6,5 h mas a mensagem cita 6 h; não há checagem
   do limite semanal de 30 h; "30h semanais" fixo no texto.
-- **Arredondamento:** horas arredondadas a 2 casas (36 s) antes de somar o saldo. Calcular
-  em segundos/minutos inteiros.
+- **Banco de Horas (resolvido):** acumula desde o primeiro dia e nunca zera; não há regra oficial,
+  é controle pessoal. Não muda com o filtro; o recorte só afeta o card "Saldo do Período".
+  Toda conta passa por `somar_saldo()`, e o arredondamento acontece só na exibição.
 - **Ajuste manual de feriado** só funciona se a observação contiver "feriado"; "Abono" com
   carga 0 grava horários padrão.
 - **Carregamento lento:** requisições de rede síncronas a cada nova sessão, sem `st.cache_data`.
@@ -233,3 +234,48 @@ fixas, retornando exit 2 para o Claude corrigir.
 4. Criar o hub em Django começando pelo app `concursos`
 5. Migrar o ponto para o hub, reaproveitando `calculations.py`
 6. Demais sistemas
+
+---
+
+## 5. Ideias para depois
+
+### Feriados automáticos pelo Google Agenda (registrada em 06/11/2026, não iniciada)
+
+**Problema.** O app não tem calendário: só sabe que um dia é feriado quando Carlos lança
+manualmente. Por isso, dia útil sem registro não desconta do banco. Se descontasse, todo
+feriado deixaria o banco negativo até o lançamento manual. Efeito colateral: uma falta sem
+registro passa despercebida (até 06/11/2026 nunca aconteceu).
+
+**Ideia.** Uma agenda própria no Google Agenda vira a fonte dos dias sem expediente, e o site
+consulta essa agenda sozinho.
+
+**Como funcionaria**
+1. Criar uma agenda só para isso (ex.: "Ponto - Dias sem expediente"). Não usar apenas a agenda
+   pronta de feriados do Brasil: ela não cobre pontes, recessos da USP e feriados municipais.
+2. No início do ano, cadastrar os dias como eventos de dia inteiro. O título do evento vira a
+   observação do dia (ex.: "Feriado", "Ponte", "Recesso").
+3. O `apps_script/Code.gs` ganha uma ação nova (ex.: `listar_feriados`) que lê essa agenda com
+   `CalendarApp`. O app já fala com o Apps Script, então não precisa de login novo do Google no
+   site. O ID da agenda fica nas Propriedades do script, nunca no código.
+4. `calculations.py` recebe só uma lista de datas e não sabe de onde ela veio. Assim a regra
+   continua testável e pode ser reaproveitada no hub, mesmo que a fonte mude.
+
+**Regras a respeitar**
+- Só leitura: a agenda não grava na planilha. Os dias de feriado são combinados em memória, o que
+  evita sobrescrever registros (regra inviolável do `CLAUDE.md`).
+- Registro manual tem prioridade sobre a agenda.
+- Com a agenda funcionando, dia útil passado sem registro e sem feriado pode virar falta (-6h) ou
+  aviso. O dia de hoje fica de fora.
+- Se a agenda não responder, nada é descontado e o app avisa. Falha de rede nunca pode virar falta.
+
+**Decidir antes de implementar**
+- Dia útil sem registro: descontar sozinho ou só avisar? (Em 06/11 a recomendação foi só avisar,
+  ao menos no início, para testar a agenda sem mexer no saldo.)
+- Trabalhar em dia de feriado: a meta é 0 e todas as horas viram crédito?
+- O Boletim FUSP deve mostrar esses feriados sozinho, sem lançamento manual?
+- A partir de que data vale? Os feriados já lançados continuam como estão.
+- Quem cadastra os dias e de onde vem a lista (calendário da USP, prefeitura)?
+
+**Trabalho manual previsto.** Criar a agenda, colar o novo `Code.gs` no editor do Apps Script,
+autorizar o acesso à agenda e publicar uma nova versão do Web App. Mudar o protocolo exige subir
+`versao` no app e no script ao mesmo tempo.

@@ -60,7 +60,9 @@ def validar_token_login(token: Optional[str], segredo: str, agora: Optional[floa
         return None
     if perfil not in PERFIS_VALIDOS:
         return None
-    if not hmac.compare_digest(assinatura, _assinar(f"{perfil}.{expira}", segredo)):
+    # Compara bytes: com str, compare_digest lança TypeError se o cookie tiver caractere não ASCII
+    esperada = _assinar(f"{perfil}.{expira}", segredo)
+    if not hmac.compare_digest(assinatura.encode("utf-8"), esperada.encode("utf-8")):
         return None
     if expira_int < (agora if agora is not None else time.time()):
         return None

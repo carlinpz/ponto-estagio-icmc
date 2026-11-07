@@ -31,6 +31,8 @@ from calculations import (
     get_weekday_name,
     generate_fusp_timesheet_html,
     get_fusp_period_dates,
+    validar_batida,
+    botoes_habilitados,
     now_br,
     today_br,
 )
@@ -48,7 +50,8 @@ from components import (
     render_welcome_screen,
     perfil_do_cookie,
     ler_cookie_no_navegador,
-    agendar_cookie_login,
+    definir_perfil,
+    encerrar_sessao,
     sync_auth_cookie,
 )
 
@@ -134,9 +137,7 @@ if "token" in st.query_params:
 
 if "perfil_ativo" not in st.session_state:
     perfil_lembrado = perfil_do_cookie()
-    st.session_state["perfil_ativo"] = perfil_lembrado
-    st.session_state["autenticado_estagiario"] = perfil_lembrado == "estagiario"
-    st.session_state["login_lembrado"] = perfil_lembrado is not None
+    definir_perfil(perfil_lembrado)
     # Se o servidor não recebeu o cookie (caso do Streamlit Cloud), pergunta uma vez ao navegador
     st.session_state["_ler_cookie_navegador"] = perfil_lembrado is None
 
@@ -145,14 +146,19 @@ sync_auth_cookie()
 
 if st.session_state.get("_ler_cookie_navegador"):
     valor_cookie = ler_cookie_no_navegador()
-    if valor_cookie is not None:  # None = navegador ainda não respondeu; o componente provoca um rerun
-        st.session_state["_ler_cookie_navegador"] = False
-        perfil_lembrado = perfil_do_cookie(valor_cookie)
-        if perfil_lembrado and st.session_state["perfil_ativo"] is None:
-            st.session_state["perfil_ativo"] = perfil_lembrado
-            st.session_state["autenticado_estagiario"] = perfil_lembrado == "estagiario"
-            st.session_state["login_lembrado"] = True
+    if valor_cookie is None:
+        # Navegador ainda não respondeu (a resposta provoca um rerun). Espera aqui para o formulário
+        # de senha não piscar a cada F5; o botão evita ficar preso se a resposta nunca chegar.
+        st.caption("Verificando login lembrado...")
+        if st.button("Entrar com senha", key="btn_entrar_com_senha"):
+            st.session_state["_ler_cookie_navegador"] = False
             st.rerun()
+        st.stop()
+    st.session_state["_ler_cookie_navegador"] = False
+    perfil_lembrado = perfil_do_cookie(valor_cookie)
+    if perfil_lembrado:
+        definir_perfil(perfil_lembrado)
+        st.rerun()
 
 # Se nenhum perfil estiver ativo, exibe a tela inicial de seleção e login:
 if st.session_state["perfil_ativo"] is None:
@@ -187,7 +193,10 @@ with st.sidebar:
             if st.session_state.get("autenticado_estagiario"):
                 st.session_state["perfil_ativo"] = "estagiario"
             else:
-                st.session_state["perfil_ativo"] = None
+                encerrar_sessao()  # vai para a tela de login: o F5 não pode reabrir o painel da chefia
+            st.rerun()
+        if st.button("Sair", use_container_width=True, key="btn_logout_chefia", help="Encerrar sessão e voltar para a tela de login"):
+            encerrar_sessao()
             st.rerun()
     else:
         st.caption("Perfil Ativo: **Estagiário(a)**")
@@ -198,11 +207,7 @@ with st.sidebar:
                 st.rerun()
         with col_sw2:
             if st.button("Sair", use_container_width=True, key="btn_logout", help="Encerrar sessão e voltar para a tela de login"):
-                st.session_state["perfil_ativo"] = None
-                st.session_state["autenticado_estagiario"] = False
-                st.session_state["_ler_cookie_navegador"] = False  # não reaproveitar o cookie que está sendo apagado
-                agendar_cookie_login(None)  # esquece o login lembrado neste navegador
-                st.query_params.clear()
+                encerrar_sessao()
                 st.rerun()
 
     if st.button("🔄 Sincronizar Nuvem", use_container_width=True, key="btn_sync_cloud", help="Recarregar dados mais recentes da planilha Google Sheets"):
@@ -300,45 +305,18 @@ with st.sidebar:
                     "observacao": "Registro via Ponto Rápido",
                 }
 
-            if acao == "entrada":
-                if reg.get("entrada"):
-                    st.error("Entrada já registrada para o dia de hoje.")
-                    return
-                reg["entrada"] = timestamp_str
-                st.toast(f"Entrada registrada às {timestamp_str}.")
-
-            elif acao == "inicio_pausa":
-                if not reg.get("entrada"):
-                    st.error("Não é possível iniciar pausa sem ter registrado a entrada.")
-                    return
-                if reg.get("inicio_pausa"):
-                    st.error("Pausa já foi iniciada anteriormente hoje.")
-                    return
-                reg["inicio_pausa"] = timestamp_str
-                st.toast(f"Pausa iniciada às {timestamp_str}.")
-
-            elif acao == "fim_pausa":
-                if not reg.get("inicio_pausa"):
-                    st.error("Não há início de pausa registrado para retornar.")
-                    return
-                if reg.get("fim_pausa"):
-                    st.error("Retorno de pausa já registrado hoje.")
-                    return
-                reg["fim_pausa"] = timestamp_str
-                st.toast(f"Retorno registrado às {timestamp_str}.")
-
-            elif acao == "saida":
-                if not reg.get("entrada"):
-                    st.error("Não é possível registrar saída sem ter registrado a entrada.")
-                    return
-                if reg.get("inicio_pausa") and not reg.get("fim_pausa"):
-                    st.error("Finalize o intervalo antes de registrar a saída.")
-                    return
-                if reg.get("saida"):
-                    st.error("Saída já registrada hoje.")
-                    return
-                reg["saida"] = timestamp_str
-                st.toast(f"Saída registrada às {timestamp_str}.")
+            erro = validar_batida(reg, acao)
+            if erro:
+                st.error(erro)
+                return
+            reg[acao] = timestamp_str
+            avisos = {
+                "entrada": "Entrada registrada",
+                "inicio_pausa": "Pausa iniciada",
+                "fim_pausa": "Retorno registrado",
+                "saida": "Saída registrada",
+            }
+            st.toast(f"{avisos[acao]} às {timestamp_str}.")
 
             st.session_state.db["registros"] = upsert_record(st.session_state.db["registros"], reg)
             if not persistir_alteracoes({hoje_str: reg}):
@@ -346,15 +324,11 @@ with st.sidebar:
             st.rerun()
 
 
-        sb_ent = registro_hoje.get("entrada") if registro_hoje else None
-        sb_ini_p = registro_hoje.get("inicio_pausa") if registro_hoje else None
-        sb_fim_p = registro_hoje.get("fim_pausa") if registro_hoje else None
-        sb_sai = registro_hoje.get("saida") if registro_hoje else None
-
-        pode_ent = not sb_ent
-        pode_pau = bool(sb_ent and not sb_ini_p and not sb_sai)
-        pode_ret = bool(sb_ent and sb_ini_p and not sb_fim_p and not sb_sai)
-        pode_sai = bool(sb_ent and (not sb_ini_p or sb_fim_p) and not sb_sai)
+        habilitados = botoes_habilitados(registro_hoje or {})
+        pode_ent = habilitados["entrada"]
+        pode_pau = habilitados["inicio_pausa"]
+        pode_ret = habilitados["fim_pausa"]
+        pode_sai = habilitados["saida"]
 
         if st.button("BATER ENTRADA", disabled=not pode_ent, use_container_width=True, key="sb_btn_ent", type="primary" if pode_ent else "secondary"):
             handle_ponto_action("entrada", now_br().strftime("%H:%M:%S"))

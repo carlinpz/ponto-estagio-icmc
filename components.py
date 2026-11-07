@@ -89,16 +89,29 @@ def verificar_login(perfil: str, senha: str, usuario: str = "") -> bool:
     return False
 
 
-def iniciar_sessao(perfil: str, lembrar: bool):
-    """Marca a sessão como autenticada e agenda (ou remove) o cookie de login lembrado."""
+def definir_perfil(perfil: Optional[str]):
+    """Define o perfil ativo da sessão ('estagiario', 'gestao' ou None para ninguém logado)."""
     st.session_state["perfil_ativo"] = perfil
     st.session_state["autenticado_estagiario"] = perfil == "estagiario"
+
+
+def iniciar_sessao(perfil: str, lembrar: bool):
+    """Marca a sessão como autenticada e agenda (ou remove) o cookie de login lembrado."""
+    definir_perfil(perfil)
     st.session_state["_ler_cookie_navegador"] = False  # login manual vence uma resposta atrasada do navegador
     segredo = _get_secret_or_default("cookie_secret")
     if lembrar and segredo:
         agendar_cookie_login(auth.gerar_token_login(perfil, segredo, dias=AUTH_COOKIE_DIAS))
     else:
         agendar_cookie_login(None)
+
+
+def encerrar_sessao():
+    """Volta para a tela de login e esquece o login lembrado neste navegador."""
+    definir_perfil(None)
+    st.session_state["_ler_cookie_navegador"] = False  # não reaproveitar o cookie que está sendo apagado
+    agendar_cookie_login(None)
+    st.query_params.clear()
 
 
 def agendar_cookie_login(token: Optional[str]):
@@ -109,11 +122,9 @@ def agendar_cookie_login(token: Optional[str]):
     if token:
         st.session_state["_cookie_acao"] = "set"
         st.session_state["_cookie_valor"] = token
-        st.session_state["login_lembrado"] = True
     else:
         st.session_state["_cookie_acao"] = "clear"
         st.session_state.pop("_cookie_valor", None)
-        st.session_state["login_lembrado"] = False
 
 
 def sync_auth_cookie():

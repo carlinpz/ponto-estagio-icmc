@@ -375,6 +375,9 @@ def app_offline(monkeypatch, tmp_path):
     monkeypatch.delenv("APPS_SCRIPT_SECRET", raising=False)
     monkeypatch.setattr(storage, "is_cloud_configured", lambda: False)
     monkeypatch.setattr(storage, "DEFAULT_DATA_PATH", str(tmp_path / "ponto_eletronico.json"))
+    # Sem navegador de verdade no teste: simula a resposta "não há cookie de login"
+    import components
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: "")
     return _app_de_teste()
 
 
@@ -421,6 +424,7 @@ def test_login_manual_ignora_resposta_atrasada_do_navegador(app_offline, monkeyp
     monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
     monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: resposta["valor"])
     at = app_offline.run()
+    at.button(key="btn_entrar_com_senha").click().run()
     [t for t in at.text_input if "chefia" in t.label.lower()][0].input(SENHA_CHEFIA_TESTE)
     [c for c in at.checkbox if "Lembrar neste navegador" in c.label][0].uncheck()
     [b for b in at.button if "SUPERVISOR" in b.label][0].click().run()
@@ -430,6 +434,89 @@ def test_login_manual_ignora_resposta_atrasada_do_navegador(app_offline, monkeyp
     at.button(key="btn_switch_to_estag").click().run()
     assert not at.exception
     assert at.session_state["perfil_ativo"] is None
+
+
+def test_login_nao_aparece_enquanto_navegador_nao_responde(app_offline, monkeypatch):
+    """Quem tem login lembrado não pode ver o formulário de senha piscar a cada F5."""
+    import components
+    monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: None)
+    at = app_offline.run()
+    assert not at.exception
+    assert not any("ENTRAR NO MEU PONTO" in b.label for b in at.button)
+
+    # Saída de emergência: se o navegador nunca responder, a pessoa não fica presa
+    at.button(key="btn_entrar_com_senha").click().run()
+    assert not at.exception
+    assert any("ENTRAR NO MEU PONTO" in b.label for b in at.button)
+
+
+def test_ler_cookie_no_navegador_contrato_com_o_componente(monkeypatch):
+    """O nome 'valor' precisa ser o mesmo no JS e no Python, senão o F5 volta a deslogar no Cloud."""
+    from types import SimpleNamespace
+    import components
+    chamadas = {}
+
+    def componente_falso(**kwargs):
+        chamadas.update(kwargs)
+        return SimpleNamespace(valor="token-do-navegador")
+
+    monkeypatch.setattr(components, "_leitor_cookie", componente_falso)
+    assert components.ler_cookie_no_navegador() == "token-do-navegador"
+    assert "on_valor_change" in chamadas  # sem o callback, o Streamlit não devolve o estado
+    assert 'setStateValue("valor"' in components._JS_LEITOR_COOKIE
+    assert f'"{components.AUTH_COOKIE_NAME}="' in components._JS_LEITOR_COOKIE
+
+    monkeypatch.setattr(components, "_leitor_cookie", lambda **kwargs: SimpleNamespace())
+    assert components.ler_cookie_no_navegador() is None  # navegador ainda não respondeu
+
+
+def test_token_com_caractere_nao_ascii_e_recusado_sem_erro():
+    assert auth.validar_token_login("estagiario.9999999999.é", "segredo") is None
+
+
+def test_cookie_adulterado_nao_derruba_a_tela_de_login(app_offline, monkeypatch):
+    import components
+    monkeypatch.setattr(components, "get_auth_cookie", lambda: None)
+    monkeypatch.setattr(components, "ler_cookie_no_navegador", lambda: "estagiario.9999999999.é")
+    at = app_offline.run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] is None
+    assert any("ENTRAR NO MEU PONTO" in b.label for b in at.button)
+
+
+def _entrar_como_chefia_lembrando(at):
+    [t for t in at.text_input if "chefia" in t.label.lower()][0].input(SENHA_CHEFIA_TESTE)
+    [b for b in at.button if "SUPERVISOR" in b.label][0].click().run()
+    assert at.session_state["perfil_ativo"] == "gestao"
+
+
+@pytest.mark.parametrize("botao", ["btn_logout_chefia", "btn_switch_to_estag"])
+def test_chefia_ao_sair_esquece_o_login_lembrado(app_offline, monkeypatch, botao):
+    """Em computador compartilhado, voltar à tela de login não pode deixar o F5 reabrir o painel."""
+    import components
+    agendados = []
+    original = components.agendar_cookie_login
+    monkeypatch.setattr(components, "agendar_cookie_login", lambda t: (agendados.append(t), original(t)))
+    at = app_offline.run()
+    _entrar_como_chefia_lembrando(at)
+    assert agendados[-1]  # login gravou o token
+
+    at.button(key=botao).click().run()
+    assert not at.exception
+    assert at.session_state["perfil_ativo"] is None
+    assert agendados[-1] is None  # cookie agendado para remoção
+
+
+def test_batida_de_pausa_depois_da_saida_e_recusada():
+    from calculations import botoes_habilitados, validar_batida
+    fechado = {"entrada": "08:00:00", "inicio_pausa": None, "fim_pausa": None, "saida": "14:00:00"}
+    assert validar_batida(fechado, "inicio_pausa") == "Não é possível iniciar pausa depois da saída."
+    pausa_aberta = {**fechado, "inicio_pausa": "11:00:00"}
+    assert validar_batida(pausa_aberta, "fim_pausa") == "Não é possível retornar da pausa depois da saída."
+    assert botoes_habilitados(fechado) == {
+        "entrada": False, "inicio_pausa": False, "fim_pausa": False, "saida": False,
+    }
 
 
 def test_login_estagiario_senha_errada_e_certa(app_offline):

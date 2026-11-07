@@ -153,6 +153,50 @@ def compute_current_elapsed_time(entrada: str, inicio_pausa: Optional[str] = Non
     return max(0.0, timedelta_to_decimal_hours(tempo_bruto))
 
 
+ACOES_PONTO = ("entrada", "inicio_pausa", "fim_pausa", "saida")
+
+
+def validar_batida(reg: Dict[str, Any], acao: str) -> Optional[str]:
+    """Devolve a mensagem de erro da batida, ou None se ela pode ser registrada."""
+    if acao not in ACOES_PONTO:
+        return "Ação desconhecida."
+    if acao == "entrada" and reg.get("entrada"):
+        return "Entrada já registrada para o dia de hoje."
+    if acao == "inicio_pausa":
+        if not reg.get("entrada"):
+            return "Não é possível iniciar pausa sem ter registrado a entrada."
+        if reg.get("inicio_pausa"):
+            return "Pausa já foi iniciada anteriormente hoje."
+        if reg.get("saida"):
+            return "Não é possível iniciar pausa depois da saída."
+    if acao == "fim_pausa":
+        if not reg.get("inicio_pausa"):
+            return "Não há início de pausa registrado para retornar."
+        if reg.get("fim_pausa"):
+            return "Retorno de pausa já registrado hoje."
+        if reg.get("saida"):
+            return "Não é possível retornar da pausa depois da saída."
+    if acao == "saida":
+        if not reg.get("entrada"):
+            return "Não é possível registrar saída sem ter registrado a entrada."
+        if reg.get("inicio_pausa") and not reg.get("fim_pausa"):
+            return "Finalize o intervalo antes de registrar a saída."
+        if reg.get("saida"):
+            return "Saída já registrada hoje."
+    return None
+
+
+def botoes_habilitados(reg: Dict[str, Any]) -> Dict[str, bool]:
+    """Quais batidas estão disponíveis agora, dado o registro do dia."""
+    ent, ini, fim, sai = (reg.get(k) for k in ACOES_PONTO)
+    return {
+        "entrada": not ent,
+        "inicio_pausa": bool(ent and not ini and not sai),
+        "fim_pausa": bool(ent and ini and not fim and not sai),
+        "saida": bool(ent and (not ini or fim) and not sai),
+    }
+
+
 def get_weekday_name(d: date) -> str:
     """Retorna o nome do dia da semana em português."""
     dias = [

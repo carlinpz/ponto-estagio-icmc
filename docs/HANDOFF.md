@@ -174,7 +174,7 @@ Entregáveis extras:
 - **Alerta legal inconsistente:** dispara > 6,5 h mas a mensagem cita 6 h; não há checagem
   do limite semanal de 30 h; "30h semanais" fixo no texto.
 - **Banco de Horas (resolvido):** acumula desde o primeiro dia e nunca zera; não há regra oficial,
-  é controle pessoal. Não muda com o filtro; o recorte só afeta o card "Saldo do Período".
+  é controle pessoal. Não muda com o filtro. Não há card de saldo do período: dois números confundiam.
   Toda conta passa por `somar_saldo()`, e o arredondamento acontece só na exibição.
 - **Ajuste manual de feriado** só funciona se a observação contiver "feriado"; "Abono" com
   carga 0 grava horários padrão.

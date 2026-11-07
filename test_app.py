@@ -696,14 +696,14 @@ def test_card_do_banco_nao_muda_com_o_filtro(app_offline, tmp_path):
 
     pagina = _html_da_pagina(at)
     assert "BANCO DE HORAS" in pagina and "+01h 15m" in pagina
-    assert "SALDO DO PERÍODO" in pagina and "+00h 15m" in pagina
+    assert "SALDO DO PERÍODO" not in pagina
 
     at.radio(key="filtro_modo_periodo").set_value("Ciclo FUSP (21 a 20)").run()
     assert not at.exception
     assert "+01h 15m" in _html_da_pagina(at)
 
 
-def test_painel_da_chefia_mostra_banco_total_e_saldo_do_periodo(app_offline, tmp_path):
+def test_painel_da_chefia_mostra_banco_total(app_offline, tmp_path):
     (tmp_path / "ponto_eletronico.json").write_text(json.dumps(_registros_para_tela()), encoding="utf-8")
     at = app_offline.run()
     [t for t in at.text_input if "chefia" in t.label.lower()][0].input(SENHA_CHEFIA_TESTE)
@@ -712,7 +712,6 @@ def test_painel_da_chefia_mostra_banco_total_e_saldo_do_periodo(app_offline, tmp
 
     banco = [m for m in at.metric if m.label == "Banco de Horas (total)"][0]
     assert banco.value == "+01h 15m"
-    assert banco.delta == "Neste período: +00h 15m"
 
 
 if __name__ == "__main__":

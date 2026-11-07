@@ -416,7 +416,7 @@ render_html(
 )
 
 # Painel de Métricas (Dashboard no Topo)
-render_metric_cards(df_mes, config.get("carga_horaria_diaria", 6.0), saldo_banco, rotulo_periodo_ativo)
+render_metric_cards(df_mes, config.get("carga_horaria_diaria", 6.0), saldo_banco)
 
 st.markdown("<br>", unsafe_allow_html=True)
 

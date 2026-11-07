@@ -12,7 +12,6 @@ import plotly.graph_objects as go
 
 from calculations import (
     decimal_hours_to_hm_str,
-    somar_saldo,
     parse_time_str,
     format_time_str,
     compute_current_elapsed_time,
@@ -159,13 +158,12 @@ def sync_auth_cookie():
     )
 
 
-def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: float, rotulo_periodo: str):
+def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: float):
     """
     Exibe os indicadores resumidos com estética minimalista metálica:
     - Dias Concluídos
     - Horas Realizadas
     - Carga Prevista
-    - Saldo do Período (muda com o filtro)
     - Banco de Horas (total desde o início, não muda com o filtro)
     """
     if df_mes.empty:
@@ -182,7 +180,6 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: 
     horas_totais_fmt = decimal_hours_to_hm_str(horas_totais)
     meta_total_fmt = decimal_hours_to_hm_str(meta_total)
     saldo_fmt = decimal_hours_to_hm_str(saldo_banco, show_sign=True)
-    saldo_periodo_fmt = decimal_hours_to_hm_str(somar_saldo(df_mes), show_sign=True)
 
     # Mesmo critério do texto exibido: menos de 30 segundos aparece como 00h 00m (equilibrado).
     if saldo_fmt.startswith("+"):
@@ -201,12 +198,12 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: 
         saldo_border = "rgba(56, 189, 248, 0.25)"
         saldo_label = "JORNADA EQUILIBRADA"
 
-    col1, col2, col3, col_periodo, col4 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center; min-height: 165px;">
+            <div class="metal-card" style="text-align: center; min-height: 150px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     DIAS CONCLUÍDOS
                 </div>
@@ -221,7 +218,7 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: 
     with col2:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center; min-height: 165px;">
+            <div class="metal-card" style="text-align: center; min-height: 150px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     HORAS REALIZADAS
                 </div>
@@ -236,7 +233,7 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: 
     with col3:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center; min-height: 165px;">
+            <div class="metal-card" style="text-align: center; min-height: 150px;">
                 <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     CARGA PREVISTA
                 </div>
@@ -248,25 +245,10 @@ def render_metric_cards(df_mes: pd.DataFrame, target_hours: float, saldo_banco: 
             """
         )
 
-    with col_periodo:
-        render_html(
-            f"""
-            <div class="metal-card" style="text-align: center; min-height: 165px;">
-                <div style="font-size: 0.72rem; color: {ICMC_COLORS['text_secondary']}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
-                    SALDO DO PERÍODO
-                </div>
-                <div style="font-size: 1.35rem; white-space: nowrap; font-weight: 800; margin: 8px 0; font-family: 'JetBrains Mono', monospace; color: {ICMC_COLORS['text_primary']};">
-                    {saldo_periodo_fmt}
-                </div>
-                <div style="font-size: 0.75rem; color: {ICMC_COLORS['text_muted']};">{html.escape(rotulo_periodo)}</div>
-            </div>
-            """
-        )
-
     with col4:
         render_html(
             f"""
-            <div class="metal-card" style="text-align: center; min-height: 165px; background: {saldo_bg}; border: 1px solid {saldo_border};">
+            <div class="metal-card" style="text-align: center; min-height: 150px; background: {saldo_bg}; border: 1px solid {saldo_border};">
                 <div style="font-size: 0.72rem; color: {saldo_accent}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">
                     BANCO DE HORAS
                 </div>
@@ -633,8 +615,6 @@ def render_manager_screen(
         st.metric(
             label="Banco de Horas (total)",
             value=decimal_hours_to_hm_str(saldo_banco, show_sign=True),
-            delta=f"Neste período: {decimal_hours_to_hm_str(somar_saldo(df_mes), show_sign=True)}",
-            delta_color="off",
         )
 
     with kpi4:

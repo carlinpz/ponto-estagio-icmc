@@ -196,15 +196,13 @@ function cicloFuspAtual_(hojeIso) {
 
 function resumir_(dias, ciclo) {
   var r = {
-    banco: 0, extras: 0, devendo: 0,
+    banco: 0,
     horasCiclo: 0, diasCiclo: 0, faltasCiclo: 0,
     somaEnt: 0, nEnt: 0, somaSai: 0, nSai: 0
   };
   for (var i = 0; i < dias.length; i++) {
     var d = dias[i];
     r.banco += d.saldo;
-    if (d.saldo > 0) r.extras += d.saldo;
-    if (d.saldo < 0) r.devendo += -d.saldo;
     if (d.data >= ciclo.inicio && d.data <= ciclo.fim) {
       r.horasCiclo += d.horas;
       if (d.status === 'Concluído') r.diasCiclo += 1;
@@ -256,6 +254,14 @@ function diaSemana_(iso) {
 function textoSeguro_(s) {
   s = String(s || '');
   return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
+/** Frase curta sob o banco, para quem não conhece a conta. */
+function explicarBanco_(h) {
+  var minutos = Math.round(h * 60);
+  if (minutos > 0) return 'horas a mais, para folgar depois';
+  if (minutos < 0) return 'horas a compensar';
+  return 'em dia';
 }
 
 function corDoSaldo_(h) {
@@ -325,28 +331,29 @@ function desenharPainel_(aba, dados, dias, r, ciclo, fuso) {
               '   ·   Horários reais registrados no ponto')
     .setFontColor(COR.rotulo).setFontStyle('italic');
 
-  // Cartões (6 cartões de 2 colunas cada, de B a M)
+  // Cartões (4 cartões de 3 colunas cada, de B a M).
+  // Só o banco fala de saldo: números separados de "horas a mais" e "horas a menos"
+  // eram lidos como dívida por quem não conhece a conta.
   var mediaEnt = r.nEnt ? formatarRelogio_(r.somaEnt / r.nEnt) : '–';
   var mediaSai = r.nSai ? formatarRelogio_(r.somaSai / r.nSai) : '–';
   var cartoes = [
-    ['BANCO DE HORAS', formatarHoras_(r.banco, true), 'acumulado desde o início', corDoSaldo_(r.banco)],
+    ['BANCO DE HORAS', formatarHoras_(r.banco, true), explicarBanco_(r.banco), corDoSaldo_(r.banco)],
     ['HORAS NO CICLO', formatarHoras_(r.horasCiclo, false), 'trabalhadas no ciclo atual', COR.valor],
-    ['HORAS EXTRAS', formatarHoras_(r.extras, false), 'soma dos dias acima da meta', COR.positivo],
-    ['HORAS DEVENDO', formatarHoras_(r.devendo, false), 'soma dos dias abaixo da meta', COR.negativo],
     ['DIAS NO CICLO', String(r.diasCiclo), r.faltasCiclo + (r.faltasCiclo === 1 ? ' falta' : ' faltas') + ' no ciclo', COR.valor],
     ['HORÁRIO MÉDIO', mediaEnt + ' → ' + mediaSai, 'entrada → saída no ciclo', COR.valor]
   ];
+  var largura = 3;
   for (var c = 0; c < cartoes.length; c++) {
-    var col = 2 + c * 2;
-    var bloco = aba.getRange(4, col, 3, 2);
+    var col = 2 + c * largura;
+    var bloco = aba.getRange(4, col, 3, largura);
     bloco.setBackground(COR.cartao)
       .setBorder(true, true, true, true, false, false, COR.borda, SpreadsheetApp.BorderStyle.SOLID)
       .setHorizontalAlignment('center');
-    aba.getRange(4, col, 1, 2).merge().setValue(cartoes[c][0])
+    aba.getRange(4, col, 1, largura).merge().setValue(cartoes[c][0])
       .setFontSize(9).setFontWeight('bold').setFontColor(COR.rotulo);
-    aba.getRange(5, col, 1, 2).merge().setValue(cartoes[c][1])
+    aba.getRange(5, col, 1, largura).merge().setValue(cartoes[c][1])
       .setFontSize(18).setFontWeight('bold').setFontColor(cartoes[c][3]);
-    aba.getRange(6, col, 1, 2).merge().setValue(cartoes[c][2])
+    aba.getRange(6, col, 1, largura).merge().setValue(cartoes[c][2])
       .setFontSize(9).setFontColor(COR.rotulo);
   }
   aba.setRowHeight(5, 40);

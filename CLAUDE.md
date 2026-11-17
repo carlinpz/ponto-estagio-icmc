@@ -19,6 +19,9 @@ Leia esse arquivo no início de qualquer tarefa não trivial.
   com Google Sheets via Apps Script (gravar/excluir uma data, síncrono, erro visível, pendências com reenvio).
 - `apps_script/Code.gs` — código do Web App (colado manualmente no editor do Apps Script; segredo em
   Propriedades do script, nunca no código). Protocolo versionado: o app só faz POST se o GET devolver `versao: 2`.
+- `apps_script/Dashboard.gs` — segundo arquivo do mesmo projeto Apps Script: monta as abas "Dashboard" e
+  "Dados do painel" (só lê a aba Registros), atualizadas por gatilho de hora em hora. Regras de saldo espelham
+  `calculations.py`; se uma regra mudar lá, mudar aqui também.
 - `auth.py` — hash de senha (PBKDF2) e token de login assinado com validade; `gerar_hash_senha.py` gera hashes.
 - `theme.py` — CSS, logo SVG, relógio em JS.
 - `launcher.pyw` / `iniciar_ponto.bat` — inicia o app no Windows sem janela de terminal.

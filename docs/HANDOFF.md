@@ -5,7 +5,19 @@ Resume a análise do projeto, o que já foi feito e o que falta.
 
 ---
 
-## STATUS em 01/11/2026 (madrugada, mais recente) — leia antes de tudo
+## STATUS em 17/11/2026 — painel no Sheets
+
+- Criado `apps_script/Dashboard.gs`: painel visual na planilha (cartões, 4 gráficos, últimos 30 registros)
+  para a supervisora, com os horários reais. Só lê a aba Registros; escreve só nas abas "Dashboard" e
+  "Dados do painel". Atualiza por gatilho de hora em hora e pelo menu "Ponto → Atualizar painel".
+- Lógica testada fora do Google (saldo, abono, ausência, ciclo FUSP). **Ainda não rodado na planilha real.**
+- **Pendente, depende do Carlos:** colar o arquivo no editor do Apps Script, rodar `montarDashboard`,
+  autorizar e compartilhar a planilha com a supervisora como Leitor. Não precisa publicar nova versão do Web App.
+- Decidido em 17/11: o boletim FUSP continua um só, com os horários reais. Gerar um segundo boletim com
+  horários fictícios para a FUSP foi recusado. Alternativas legais ficaram em aberto (ver conversa):
+  avisar ao passar de 6h no dia, ou formalizar a compensação com a FUSP/coordenação.
+
+## STATUS em 01/11/2026 (madrugada) — leia antes de tudo
 
 - **Etapa 4 ✅**: app publicado no Streamlit Cloud, acesso só para convidados (login Google).
 - **Apps Script novo ✅** no ar: GET responde `versao: 2` e POST com segredo errado é recusado.
